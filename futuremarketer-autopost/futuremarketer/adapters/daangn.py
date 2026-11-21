@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 from ..content import fit_text
 
@@ -26,6 +27,7 @@ PRICE_NAME_MAX = 15        # 가격 항목 이름 칸은 15자까지 받는다
 PRICE_NOTE_MAX = 50        # 가격 추가 설명 칸은 50자까지
 NEWS_TITLE_MAX = 30        # 소식 제목 칸은 30자까지
 NEWS_IMAGE_MAX = 10        # 소식 사진은 10장까지
+RESTRICTION_TEXT = re.compile(r"비즈프로필이 제재되어 이용할 수 없|운영정책을 위반해 활동이 제한")
 PHOTO_COUNTER = re.compile(r"^\s*\d+\s*/\s*10\s*$")     # 소식 사진 버튼에 보이는 「0/10」
 SORTABLE = '[aria-roledescription="sortable"]'           # 소식에 붙인 사진 하나하나(끌어서 순서를 바꾸는 칸)
 
@@ -383,6 +385,53 @@ class DaangnSite:
             self.public_id = self.read_public_id(wait=2)
             return True
         return False
+
+    def business_verification(self, biz_id: str) -> str:
+        """소식 작성 제한과 사업자 증빙을 별도로 읽는다. 업체별 편집 화면에 입력하는 일은 없다."""
+        base = f"{self.urls.base}/biz_accounts/{biz_id}/manager"
+        info = f"{base}/home/update/base_info"
+        def at(expected: str) -> bool:
+            current = urlsplit(self.page.url)
+            if self._is_login_url(self.page.url) or self._session is False:
+                raise SiteError("LOGIN_REQUIRED", "당근 로그인이 풀렸습니다.")
+            wanted = urlsplit(expected)
+            return current.netloc == wanted.netloc and current.path.rstrip("/") == wanted.path.rstrip("/")
+
+        editor = f"{base}/posts/new"
+        self._goto(editor)
+        restricted = self.page.get_by_text(RESTRICTION_TEXT)
+        title = self.page.get_by_placeholder("소식 제목", exact=True)
+        start = self.page.get_by_role("button", name=re.compile(r"^(새로 쓰기|직접 작성)$"))
+        with contextlib.suppress(Exception):
+            restricted.or_(title).or_(start).first.wait_for(state="visible", timeout=6000)
+        if not at(editor):
+            return "EDITOR_UNAVAILABLE"
+        if self._visible(restricted):
+            return "RESTRICTED"
+        if not (self._visible(title) or self._visible(start)):
+            return "EDITOR_UNAVAILABLE"
+
+        self._goto(info)
+        section = self.page.get_by_text("증빙 서류", exact=True)
+        if not at(info):
+            return "EDITOR_UNAVAILABLE"
+        with contextlib.suppress(Exception):
+            section.or_(restricted).first.wait_for(state="visible", timeout=6000)
+        if self._visible(restricted):
+            return "RESTRICTED"
+        if not self._visible(section) or not at(info):
+            return "UNKNOWN"
+        # 같은 칸에 활동 증빙 등 다른 서류도 있다. 사업자등록증 행의 상태만 판정한다.
+        rows = section.locator("xpath=../..").locator(":scope > *").filter(has_text=re.compile("사업자등록증|사업자 인증"))
+        if rows.count() != 1 or not rows.first.is_visible():
+            return "UNKNOWN"
+        label = " ".join(rows.first.inner_text().split())
+        if re.search(r"등록증\s*추가|미인증|미등록|미완료|심사\s*중|검수\s*중|대기|반려|만료|취소|거절", label):
+            return "UNVERIFIED"
+        if "활동 증빙" in label:
+            return "UNKNOWN"
+        approved = re.fullmatch(r"사업자\s*(?:등록증|정보)?\s*[·:|]?\s*(?:(?:인증|승인|검수)\s*완료|승인됨|인증됨)", label)
+        return "VERIFIED" if approved else "UNKNOWN"
 
     # --- 가격 등록 ----------------------------------------------------------
     def _price_edit_button(self, item_name: str):

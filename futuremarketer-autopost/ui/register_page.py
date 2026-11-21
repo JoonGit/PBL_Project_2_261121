@@ -34,10 +34,11 @@ def _load() -> None:
 
 def _register() -> None:
     ids = [i for i in st.session_state.get("_selectable", []) if st.session_state.get(f"sel_{i}")]
+    draft_only = st.session_state.get("draft_only", False)
     try:
         common.start_worker()       # 워커가 꺼져 있었다면 다시 켠다
         out = register_service.enqueue_register(common.engine(), common.secrets(), common.settings(), ids,
-                                                run_key=common.request_key(RUN_KEY))
+                                                run_key=common.request_key(RUN_KEY), draft_only=draft_only)
     except Exception as exc:
         common.flash(common.error_text(exc), "error")
         return
@@ -45,7 +46,7 @@ def _register() -> None:
     for product_id in ids:
         st.session_state[f"sel_{product_id}"] = False
     st.session_state["sel_all"] = False
-    message = f"{len(out['queued'])}개 등록을 시작합니다."
+    message = f"{len(out['queued'])}개 초안을 준비합니다." if draft_only else f"{len(out['queued'])}개 등록을 시작합니다."
     if out["skipped"]:
         message += " 제외: " + ", ".join(f"{s['code']}({s['reason']})" for s in out["skipped"])
     common.flash(message, "success" if out["queued"] else "warning")
@@ -153,6 +154,15 @@ def _row(row: dict) -> None:
         price.html(f'<p class="fm-price">{common.esc(common.won(row["price"]))}</p>')
         job = row["job"]
         state.html(common.pill(row["state"], row["label"]))
+        if job and job.get("preview"):
+            preview = job["preview"]
+            with st.expander("가격 없는 소식 초안"):
+                st.text(preview["title"])
+                if preview["body"]:
+                    st.text(preview["body"])
+                files = [str(common.store().path_for(key)) for key in preview["image_keys"] if common.store().exists(key)]
+                if files:
+                    st.image(files, width=220)
         if row["state"] == "NEEDS_CHECK" and job:
             _a, yes, no = st.columns([1.35, 2.2, 2.2])
             yes.button("당근에 올라가 있음", key=f"ok_{job['id']}", on_click=_resolve, args=(job["id"], "DONE"), width="stretch")
@@ -192,7 +202,9 @@ def _list(listing: dict) -> None:
     with head:
         common.section(f"상품 {len(rows)}개", summary)
     with action:
-        st.button(f"선택한 {len(chosen)}개 등록" if chosen else "등록할 상품을 골라 주세요", type="primary",
+        draft_only = st.checkbox("게시하지 않고 초안만 준비", key="draft_only")
+        action_name = "초안 준비" if draft_only else "등록"
+        st.button(f"선택한 {len(chosen)}개 {action_name}" if chosen else "등록할 상품을 골라 주세요", type="primary",
                   disabled=not chosen, on_click=_register, width="stretch", icon=":material/send:")
     st.checkbox("등록 가능한 상품 모두 선택", key="sel_all", on_change=_select_all, disabled=not selectable)
     for row in rows:
@@ -202,7 +214,7 @@ def _list(listing: dict) -> None:
 # --- 진행 ---------------------------------------------------------------------
 def _progress(prog: dict) -> None:
     with st.container(border=True):
-        common.section("등록 진행", "글 → 이미지 → 가격 등록 → 소식 등록 순서로 진행합니다. 삭제는 소식 → 가격 순서로 지웁니다")
+        common.section("등록 진행", "글과 사진을 준비하고 사업자 인증과 소식 작성 가능 여부를 확인합니다. 게시가 보류되면 상품의 초안을 열어 보세요.")
         focus = prog["focus"]
         if not focus:
             st.html('<p class="fm-empty">상품을 고르고 등록을 누르면 자동화 과정이 여기에 보입니다. '
@@ -213,6 +225,8 @@ def _progress(prog: dict) -> None:
             state = {"SUCCEEDED": "DONE", "CANCELED": ""}.get(job["status"], job["status"])
             done = "삭제 완료" if job.get("kind") == "REMOVE" else "등록 완료"
             label = {"SUCCEEDED": done, "CANCELED": "취소"}.get(job["status"]) or query_service.STATE_LABEL.get(job["status"], "")
+            if job.get("preview"):
+                label = "게시 보류"
             jobs.append('<div class="fm-job"><div>'
                         f'<p class="fm-name">{common.esc(job["name"])}</p>{common.steps_html(job["steps"])}</div>'
                         f'<div>{common.pill(state, label)}</div></div>')

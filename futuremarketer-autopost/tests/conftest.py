@@ -84,6 +84,7 @@ class SiteHub:
 
     def __init__(self):
         self.logged_in = True
+        self.business_status = "VERIFIED"
         self.prices: list[tuple] = []
         self.price_photos: list[Path | None] = []
         self.posts: list[dict] = []
@@ -121,6 +122,9 @@ class FakeSite:
     def is_logged_in(self, biz_id):
         self.public_id = self.hub.public_id
         return self.hub.logged_in
+
+    def business_verification(self, biz_id):
+        return self.hub.business_status
 
     def register_price(self, biz_id, name, price, image_path=None, *, before_submit):
         self.on_log("가격표 화면을 엽니다.", "INFO", None)

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from ..adapters.daangn import practice_urls, real_urls
 from ..config import Settings
+from ..content import draft_without_prices
 from ..db import fetch_all, fetch_one, session_scope
 from ..defaults import STEPS
 from ..repositories import core
@@ -28,7 +29,13 @@ def display_state(status: str, reasons: list[str]) -> str:
 def _job_view(job: dict | None) -> dict | None:
     if not job:
         return None
+    preview = None
+    if job.get("error_code") == "PREVIEW_ONLY":
+        steps = job["steps_json"]
+        title, body = draft_without_prices(steps["SCRIPT"]["title"], steps["SCRIPT"]["body"])
+        preview = {"title": title, "body": body, "image_keys": steps["IMAGE"].get("image_keys") or []}
     return {"id": job["id"], "run_id": job["run_id"], "status": job["status"], "current_step": job["current_step"],
+            "preview": preview,
             "kind": (job["request_json"] or {}).get("kind") or "REGISTER",
             "steps": job["steps_json"], "error_message": job["error_message"], "error_code": job["error_code"],
             "started_at": job["started_at"], "finished_at": job["finished_at"], "product_id": job["product_id"]}
@@ -74,7 +81,7 @@ def product_rows(engine, secrets: SecretStore, settings: Settings) -> dict:
             "id": product["id"], "code": product["product_code"], "name": product["name"], "price": product["price_krw"],
             "has_script": bool(product["script"]), "local_images": len(local), "generated_images": len(generated),
             "thumb_key": thumb["storage_key"] if thumb else None,
-            "state": state, "label": STATE_LABEL[state],
+            "state": state, "label": "게시 보류" if job and job.get("error_code") == "PREVIEW_ONLY" else STATE_LABEL[state],
             "reasons": reasons if state in ("BLOCKED", "FAILED") else [],
             "selectable": status in ("NONE", "FAILED") and not reasons,
             "changed": status == "DONE" and readiness.changed_after_registration(product, record),

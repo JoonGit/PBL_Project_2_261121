@@ -5,7 +5,7 @@
 - MockTextGenerator: 연결 없이 입력만으로 글을 만든다(시험·오프라인 연습용).
 
 세 가지 모두 generate(guideline, name, info, images) → TextResult(title, body) 로 같다.
-가격은 맡기지 않는다. 가격 줄은 앱이 붙인다(content.post_from_ai).
+가격은 가격표에서 따로 관리한다.
 """
 from __future__ import annotations
 
@@ -66,6 +66,7 @@ def build_user_text(name: str, info: str | None, image_count: int) -> str:
     lines.append(f"함께 보낸 사진: {image_count}장" if image_count else "사진: 없음")
     lines.append("")
     lines.append("위 내용만으로 당근 비즈프로필 소식의 제목과 본문을 써 주세요.")
+    lines.append("제품 특징과 사용법을 설명하는 정보성 소식입니다. 금액, 판매·거래 안내, 구매나 채팅 권유는 제외하세요.")
     return "\n".join(lines)
 
 
@@ -85,7 +86,6 @@ class MockTextGenerator:
             body += ["", "이런 점을 확인해 보세요."] + [f"- {f}" for f in facts[:6]]
         if images:
             body += ["", f"사진 {len(images)}장을 함께 올렸습니다."]
-        body += ["", "궁금한 점은 채팅으로 편하게 문의해 주세요."]
         return TextResult(name[:40], "\n".join(body), self.model)
 
 

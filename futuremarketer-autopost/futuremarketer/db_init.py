@@ -43,7 +43,7 @@ def drop_all(engine: Engine) -> None:
 
 
 def seed(engine: Engine, target: str = "REAL") -> None:
-    """연결 행 1개, AI 연결 2개, 기본 지침 2개. 이미 있으면 건드리지 않는다."""
+    """초기 행을 준비하고, 활성 기본 지침이 달라졌다면 이전 판을 보존하며 갱신한다."""
     now = utcnow()
     with session_scope(engine) as s:
         if not fetch_one(s, "SELECT id FROM channel_connection WHERE id = 1"):
@@ -53,10 +53,16 @@ def seed(engine: Engine, target: str = "REAL") -> None:
             if not fetch_one(s, "SELECT provider FROM ai_connection WHERE provider = :p", p=provider):
                 execute(s, "INSERT INTO ai_connection (provider, mode, status, updated_at)"
                            " VALUES (:p, 'NONE', 'UNKNOWN', :now)", p=provider, now=now)
+        fetch_one(s, "SELECT id FROM channel_connection WHERE id=1 FOR UPDATE")
         for kind, body in DEFAULT_PROMPTS.items():
-            if not fetch_one(s, "SELECT id FROM prompt_template WHERE kind = :k LIMIT 1", k=kind):
-                execute(s, "INSERT INTO prompt_template (id, kind, version_no, body, is_default, is_active, created_at)"
-                           " VALUES (:id, :k, 1, :body, 1, 1, :now)", id=new_id(), k=kind, body=body, now=now)
+            active = fetch_one(s, "SELECT id,body,is_default FROM prompt_template WHERE kind=:k AND is_active=1 FOR UPDATE", k=kind)
+            if active and (not active["is_default"] or active["body"].strip() == body.strip()):
+                continue
+            if active:
+                execute(s, "UPDATE prompt_template SET is_active=0 WHERE id=:id", id=active["id"])
+            latest = fetch_one(s, "SELECT MAX(version_no) AS n FROM prompt_template WHERE kind=:k", k=kind)["n"] or 0
+            execute(s, "INSERT INTO prompt_template (id, kind, version_no, body, is_default, is_active, created_at)"
+                       " VALUES (:id,:k,:v,:body,1,1,:now)", id=new_id(), k=kind, v=latest+1, body=body, now=now)
 
 
 def schema_version(engine: Engine) -> str | None:

@@ -69,7 +69,7 @@ def finish_product(session, job: dict, status: str, now) -> None:
             st=status, now=now, id=job["product_id"])
 
 
-def _resume(session, job: dict, prompts: dict, now) -> None:
+def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool) -> None:
     """실패한 작업을 다시 줄에 세운다. 끝난 단계의 결과는 그대로 두고, 지침은 지금 것으로 바꾼다.
 
     예외 하나: 가격 단계가 사진을 올리지 않던 예전 방식으로 끝났다면 이번에 다시 한다.
@@ -82,7 +82,7 @@ def _resume(session, job: dict, prompts: dict, now) -> None:
     price = steps["PRICE"]
     if price["status"] == "DONE" and "photo" not in price and "detail" not in price:
         steps["PRICE"] = {"status": "PENDING"}
-    request = {**job["request_json"], "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
+    request = {**job["request_json"], "draft_only": draft_only, "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
                "prompt_versions": {k: v["version_no"] for k, v in prompts.items()}}
     execute(session,
             "UPDATE task_job SET status='QUEUED', steps_json=:steps, request_json=:req, current_step=NULL, run_token=NULL,"
@@ -92,7 +92,8 @@ def _resume(session, job: dict, prompts: dict, now) -> None:
             j=job["id"], now=now, id=job["product_id"])
 
 
-def enqueue_register(engine, secrets: SecretStore, settings: Settings, product_ids: list[str], *, run_key: str) -> dict:
+def enqueue_register(engine, secrets: SecretStore, settings: Settings, product_ids: list[str], *,
+                     run_key: str, draft_only: bool = False) -> dict:
     """고른 상품들을 등록 줄에 세운다. 돌려주는 값: {run_id, queued:[코드], skipped:[{code, reason}]}"""
     ids = list(dict.fromkeys(product_ids))
     if not ids:
@@ -136,13 +137,13 @@ def enqueue_register(engine, secrets: SecretStore, settings: Settings, product_i
             if last and last["status"] == "FAILED" and job_place(last) == place \
                     and last["request_json"].get("kind") != "REMOVE" \
                     and last["request_json"].get("fingerprint") == product["source_fingerprint"]:
-                _resume(s, last, prompts, now)
+                _resume(s, last, prompts, now, draft_only=draft_only)
                 queued.append(code)
                 continue
             job_id = new_id()
             request = {"product_code": code, "name": product["name"], "price": product["price_krw"],
                        "info": product["info"], "post_title": product["post_title"], "script": product["script"],
-                       "fingerprint": product["source_fingerprint"], "target": place[0], "biz_id": place[1],
+                       "fingerprint": product["source_fingerprint"], "target": place[0], "biz_id": place[1], "draft_only": draft_only,
                        "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
                        "prompt_versions": {k: v["version_no"] for k, v in prompts.items()}}
             execute(s,

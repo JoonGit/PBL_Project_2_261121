@@ -36,7 +36,7 @@ from .adapters.image_ai import CodexCliImageGenerator, MockImageGenerator, OpenA
 from .adapters.text_ai import (MAX_TEXT_IMAGES, AiError, ClaudeApiTextGenerator, ClaudeCliTextGenerator,
                                MockTextGenerator)
 from .config import Settings, load_settings
-from .content import TITLE_MAX, post_from_ai, post_from_script
+from .content import AMOUNT_RE, SALE_TERMS, TITLE_MAX, format_price, post_from_ai, post_from_script
 from .db import execute, fetch_all, fetch_one, make_engine, session_scope
 from .db_init import ensure_schema
 from .defaults import STEPS
@@ -625,6 +625,19 @@ class Worker:
 
         site = self._ensure_site(job, step)
         try:
+            if job["request_json"].get("kind") != "REMOVE":
+                status = site.business_verification(job["request_json"]["biz_id"])
+                if status not in ("VERIFIED", "UNVERIFIED", "UNKNOWN"):
+                    reason = ("당근이 이 비즈프로필의 소식 작성을 제한했습니다." if status == "RESTRICTED"
+                              else "선택한 업체의 소식 작성 화면을 확인할 수 없습니다.")
+                    raise StepFailed("PREVIEW_ONLY", f"게시 보류 · {reason} 가격 없는 초안을 앱에서 확인하세요.")
+                if job["request_json"].get("draft_only"):
+                    raise StepFailed("PREVIEW_ONLY", "게시 보류 · 초안만 준비했습니다. 가격 없는 글과 사진을 앱에서 확인하세요.")
+                if step == "NEWS" and status != "VERIFIED":
+                    script = job["steps_json"]["SCRIPT"]
+                    copy = f"{script['title']}\n{script['body']}"
+                    if SALE_TERMS.search(copy) or AMOUNT_RE.search(copy):
+                        raise StepFailed("PREVIEW_ONLY", "게시 보류 · 가격표 단계는 끝났습니다. 금액이나 판매 안내가 있는 소식은 사업자 인증을 확인한 뒤 게시할 수 있습니다.")
             return call(site, before_submit)
         except SiteError as exc:
             shot = self._capture(site)
@@ -658,6 +671,11 @@ class Worker:
         """소식: 상품 사진을 모두 올린 뒤 제목·본문을 쓴다."""
         req = job["request_json"]
         steps = job["steps_json"]
+        script = steps["SCRIPT"]
+        if script.get("mode") == "AI":
+            # 이전 버전에서 앱이 덧붙인 마지막 판매가격 줄도 재시도 시 공개 소식에서 뺀다.
+            suffix = f"\n\n판매가격: {format_price(req['price'])}"
+            script["body"] = script["body"].removesuffix(suffix)
         paths = [self.store.path_for(k) for k in steps["IMAGE"].get("image_keys") or []][:self.settings.max_images]
         result = self._site_call(job, "NEWS", submitted, lambda site, before: site.write_news(
             req["biz_id"], steps["SCRIPT"]["title"], steps["SCRIPT"]["body"], paths, before_submit=before))

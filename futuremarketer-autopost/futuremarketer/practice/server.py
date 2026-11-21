@@ -368,6 +368,10 @@ def make_handler(state: PracticeState):
         def _manager(self, path: str, swap: str | None):
             """관리 화면 하나. swap 이 있으면 화면 속 첫 가게 주소를 그 가게 주소로 바꿔 보낸다."""
             routes = {f"{MANAGER}/home": lambda: page("홈", self._home()),
+                      f"{MANAGER}/home/update/base_info": lambda: page("기본 정보", NAV +
+                          '<section><div><h3>증빙 서류</h3></div><div>' +
+                          ('사업자등록증 · 인증 완료' if self.biz == BIZ_ID else '<button>＋ 사업자등록증 추가</button>') +
+                          '</div><div>활동 증빙</div></section>'),
                       f"{MANAGER}/pricing": lambda: page("가격", PRICING_BODY, PRICING_SCRIPT),
                       f"{MANAGER}/posts/new": lambda: page("소식 작성", POST_BODY, POST_SCRIPT),
                       f"{MANAGER}/posts": lambda: page("소식", NAV + "<h1>소식</h1>" + self._posts_html(menu=True)

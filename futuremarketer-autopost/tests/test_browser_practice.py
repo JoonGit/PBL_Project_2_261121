@@ -53,6 +53,7 @@ def test_login_price_and_news_on_practice_site(tmp_path):
         site.close()                                # 로그인 뒤 창을 닫아도
 
         assert site.is_logged_in("1001") is True    # 다시 열면 로그인이 유지된다(쿠키가 프로필에 남음)
+        assert site.business_verification("1001") == "VERIFIED"
         name = "수달 3IN1 멀티 강아지 장난감"            # 16자: 항목 칸(15자)에 맞춰 줄이고 전체 이름은 추가 설명에
         first = site.register_price("1001", name, 24900, photos[0], before_submit=lambda: submits.append("price"))
         assert first == {"action": "ADDED", "item_name": "수달 3IN1 멀티 강아지", "photo": True}
@@ -163,6 +164,7 @@ def test_choose_second_profile_on_practice_site(tmp_path):
 
         chosen = site.login(60, pick_second, choose=True)
         assert chosen == {"biz_id": "1002", "biz_name": "연습용 가게 2호점", "public_id": "7002"}
+        assert site.business_verification("1002") == "UNVERIFIED"
         site.register_price("1002", "2호점 상품", 5000, photo, before_submit=lambda: None)
     finally:
         site.close()

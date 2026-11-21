@@ -1,7 +1,7 @@
 """소식에 올릴 제목·본문을 정하는 규칙(순수 함수).
 
 - 대본이 있으면 한 글자도 바꾸지 않고 본문으로 쓴다.
-- AI 가 쓴 글에는 가격을 맡기지 않는다. 가격 줄은 앱이 엑셀의 값으로 붙인다.
+- 상품 가격은 가격표에서 관리한다. AI 소식에는 가격 줄을 추가하지 않는다.
 - AI 글에 입력에 없던 금액이 섞여 있으면 등록하지 않는다.
 """
 from __future__ import annotations
@@ -19,6 +19,8 @@ AMOUNT_RE = re.compile(rf"((?:{NUMBER}\s*(?:천만|만|천|억)\s*)*{NUMBER}\s*(
 # 「180~190만 원대」: 앞 숫자에도 뒤의 단위를 적용한다.
 RANGE_RE = re.compile(rf"({NUMBER})\s*[~\-–]\s*({NUMBER})\s*(천만|만|천|억)?\s*원")
 PART_RE = re.compile(rf"({NUMBER})\s*(천만|만|천|억)?")
+SALE_TERMS = re.compile(r"판매\s*(?:합니다|해요|중|가격|가[:：]|문의)|팝니다|팔아요|구매\s*(?:문의|의사|예약|신청)|"
+                        r"주문\s*(?:문의|하기|접수|하세요)|직거래|택배\s*거래|네고|에눌")
 
 
 def fit_text(text: str | None, limit: int) -> str:
@@ -41,6 +43,17 @@ def fit_text(text: str | None, limit: int) -> str:
 
 def format_price(price: int) -> str:
     return f"{int(price):,}원"
+
+
+def draft_without_prices(title: str, body: str) -> tuple[str, str]:
+    """로컬 미리보기에서 금액·가격 안내가 있는 줄을 제외한다. 등록용 원본은 보존한다."""
+    price_text = re.compile(r"(?:판매가(?:격)?|가격|희망가|정가|할인가|배송비)\s*(?:[:：]|\d)|(?:[₩￦$€£]|KRW|USD)\s*[\d,]+|[\d,]+\s*KRW", re.I)
+
+    def contains_price(line: str) -> bool:
+        return bool(AMOUNT_RE.search(line) or price_text.search(line))
+
+    lines = [line for line in body.splitlines() if not contains_price(line)]
+    return ("상품 소개" if contains_price(title) else title), re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def post_from_script(name: str, post_title: str | None, script: str) -> tuple[str, str]:
@@ -76,7 +89,7 @@ def foreign_amounts(body: str, *, price: int, info: str | None, name: str) -> li
 
 def post_from_ai(name: str, price: int, info: str | None, post_title: str | None,
                  ai_title: str, ai_body: str) -> tuple[str, str]:
-    """AI 결과를 검사하고 가격 줄을 붙인다. 문제가 있으면 ValueError(사람이 읽을 이유)."""
+    """AI 결과를 검사한다. 문제가 있으면 ValueError(사람이 읽을 이유)."""
     title = (post_title or ai_title or "").strip()
     body = (ai_body or "").strip()
     if not title:
@@ -88,7 +101,6 @@ def post_from_ai(name: str, price: int, info: str | None, post_title: str | None
     if wrong:
         shown = ", ".join(format_price(a) for a in wrong[:3])
         raise ValueError(f"AI 글에 입력에 없던 금액이 있습니다: {shown}")
-    body = f"{body}\n\n판매가격: {format_price(price)}"
     if len(body) > BODY_MAX:
         raise ValueError(f"AI 가 쓴 본문이 너무 깁니다({len(body)}자).")
     return title, body

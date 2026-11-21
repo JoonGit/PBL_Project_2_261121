@@ -83,7 +83,8 @@ def test_ai_writes_text_and_makes_image_right_before_registering(engine, store, 
     assert text_ai.calls == 1 and image_ai.calls == 1
     assert text_ai.last["guideline"] == DEFAULT_PROMPTS["TEXT"] and image_ai.last["guideline"] == DEFAULT_PROMPTS["IMAGE"]
     post = hub.posts[0]
-    assert post["body"].endswith("판매가격: 24,900원")                     # 가격 줄은 앱이 원본 값으로 붙인다
+    assert "판매가격: 24,900원" not in post["body"]
+    assert hub.prices[0][2] == 24900
     key = job["steps_json"]["IMAGE"]["image_keys"][0]
     assert key.startswith("generated/P2-") and post["images"] == [store.path_for(key)]
     saved = store.read(key)
@@ -114,6 +115,92 @@ def test_ai_text_with_unknown_amount_is_not_posted(engine, store, settings, secr
 
 def query_rows(engine, secrets, settings):
     return {r["code"]: r for r in query_service.product_rows(engine, secrets, settings)["rows"]}
+
+
+@pytest.mark.parametrize("business_status", ["EDITOR_UNAVAILABLE", "RESTRICTED"])
+def test_sales_wait_as_a_priceless_local_draft(engine, store, settings, secrets, worker, hub, text_ai, image_ai,
+                                               business_status):
+    rows = prepare(engine, store, settings, secrets, [["P1", "접이식 테이블", 45000, "70cm 원목 상판", None, None, None]])
+    hub.business_status = business_status
+    enqueue(engine, secrets, settings, rows, ["P1"])
+    run_until_idle(worker)
+    assert not hub.prices and not hub.posts
+    row = query_rows(engine, secrets, settings)["P1"]
+    assert row["label"] == "게시 보류" and row["removal"] is None
+    draft = row["job"]["preview"]
+    assert "70cm 원목" in draft["body"] and "45,000" not in draft["body"]
+    assert store.exists(draft["image_keys"][0]) and draft["title"]
+    assert row["job"]["steps"]["NEWS"]["status"] == "PENDING"
+    assert text_ai.calls == image_ai.calls == 1
+
+    hub.business_status = "VERIFIED"
+    enqueue(engine, secrets, settings, {"P1": row}, ["P1"], run_key="verified")
+    run_until_idle(worker)
+    assert text_ai.calls == image_ai.calls == 1
+    assert len(hub.prices) == len(hub.posts) == 1
+    assert "45,000원" not in hub.posts[0]["body"]
+
+
+@pytest.mark.parametrize("business_status", ["UNVERIFIED", "UNKNOWN"])
+def test_unrestricted_profile_can_register_a_product_and_an_information_post_without_certificate(
+        engine, store, settings, secrets, worker, hub, business_status):
+    rows = prepare(engine, store, settings, secrets, [["P1", "탁상시계", 12000, "원목 시계", None, "시곗바늘은 뒤쪽 다이얼로 맞춥니다.", None]])
+    hub.business_status = business_status
+    enqueue(engine, secrets, settings, rows, ["P1"])
+    run_until_idle(worker)
+    assert hub.prices[0][2] == 12000 and hub.posts[0]["body"] == "시곗바늘은 뒤쪽 다이얼로 맞춥니다."
+
+
+def test_unverified_can_register_price_but_sales_copy_stays_in_draft(engine, store, settings, secrets, worker, hub):
+    rows = prepare(engine, store, settings, secrets, [["P1", "탁상시계", 12000, "원목 시계", None, "시계를 판매합니다. 직거래 가능해요.", None]])
+    hub.business_status = "UNVERIFIED"
+    enqueue(engine, secrets, settings, rows, ["P1"])
+    run_until_idle(worker)
+    row = query_rows(engine, secrets, settings)["P1"]
+    assert len(hub.prices) == 1 and not hub.posts
+    assert row["removal"] == {"price": "탁상시계", "news": None} and row["label"] == "게시 보류"
+
+
+def test_reverification_before_news_keeps_an_existing_price_removable(engine, store, settings, secrets, worker, hub):
+    rows = prepare(engine, store, settings, secrets, [["P1", "접이식 테이블", 45000, "원목 상판", None, "크기는 70cm예요.\n판매가격: 45,000원", None]])
+    hub.fail["news_before"] = SiteError("ELEMENT_NOT_FOUND", "소식 작성이 중단됐습니다.")
+    enqueue(engine, secrets, settings, rows, ["P1"])
+    run_until_idle(worker)
+    assert len(hub.prices) == 1 and not hub.posts
+    hub.fail.clear()
+    hub.business_status = "RESTRICTED"
+    enqueue(engine, secrets, settings, query_rows(engine, secrets, settings), ["P1"], run_key="resumed")
+    run_until_idle(worker)
+    row = query_rows(engine, secrets, settings)["P1"]
+    assert not hub.posts and row["job"]["preview"]["body"] == "크기는 70cm예요."
+    assert row["removal"] == {"price": "접이식 테이블", "news": None}
+
+
+def test_draft_only_button_stops_a_verified_job_until_explicit_registration(engine, store, settings, secrets, worker, hub, text_ai):
+    rows = prepare(engine, store, settings, secrets, [["P1", "탁상시계", 12000, "원목 시계", None, None, None]])
+    register_service.enqueue_register(engine, secrets, settings, [rows["P1"]["id"]], run_key="preview", draft_only=True)
+    run_until_idle(worker)
+    assert not hub.prices and not hub.posts and query_rows(engine, secrets, settings)["P1"]["job"]["preview"]
+    enqueue(engine, secrets, settings, query_rows(engine, secrets, settings), ["P1"], run_key="publish")
+    run_until_idle(worker)
+    assert len(hub.prices) == len(hub.posts) == text_ai.calls == 1
+
+
+def test_new_default_guidelines_preserve_history_and_custom_prompts(engine):
+    from futuremarketer.db_init import seed
+    from futuremarketer.repositories.core import active_prompt
+
+    with session_scope(engine) as db:
+        execute(db, "UPDATE prompt_template SET body='예전 기본 소식 지침' WHERE kind='TEXT' AND is_active=1")
+    seed(engine, "PRACTICE")
+    with session_scope(engine) as db:
+        assert active_prompt(db, "TEXT")["body"] == DEFAULT_PROMPTS["TEXT"]
+        assert fetch_one(db, "SELECT body FROM prompt_template WHERE kind='TEXT' AND version_no=1")["body"] == "예전 기본 소식 지침"
+    custom = "우리 가게에서 직접 사용한 방법을 먼저 설명하고 문장은 짧게 씁니다."
+    settings_service.save_prompt(engine, "TEXT", custom)
+    seed(engine, "PRACTICE")
+    with session_scope(engine) as db:
+        assert active_prompt(db, "TEXT")["body"] == custom
 
 
 def test_transient_ai_errors_are_retried(engine, store, settings, secrets, worker, hub, text_ai, image_ai):
