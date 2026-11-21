@@ -108,8 +108,9 @@ class FakeSite:
         if point in self.hub.fail:
             raise self.hub.fail.pop(point)
 
-    def login(self, timeout, should_cancel):
-        self.on_log("Aside 창에서 로그인해 주세요.", "INFO", None)
+    def login(self, timeout, should_cancel, choose=False):
+        self.hub.chose = choose
+        self.on_log("Aside 창에서 비즈프로필을 골라 주세요." if choose else "Aside 창에서 로그인해 주세요.", "INFO", None)
         if self.hub.on_login:
             self.hub.on_login()
         if should_cancel():

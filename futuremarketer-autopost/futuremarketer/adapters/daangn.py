@@ -91,6 +91,7 @@ class DaangnSite:
         self._on_log = on_log or (lambda message, level, shot: None)
         self._session: bool | None = None
         self.public_id: str | None = None
+        self._saw_select = False
 
     # --- 공통 도구 ---------------------------------------------------------
     def _log(self, message: str, level: str = "INFO", shot: bool = False) -> None:
@@ -123,6 +124,8 @@ class DaangnSite:
 
     def _on_response(self, response) -> None:
         with contextlib.suppress(Exception):
+            if "/select_profile" in response.url:
+                self._saw_select = True
             if self.urls.session_re.search(response.url):
                 self._session = response.status == 200
 
@@ -292,10 +295,18 @@ class DaangnSite:
                 kept += 1
         return kept
 
-    def login(self, timeout: float, should_cancel: Callable[[], bool]) -> dict:
-        """로그인 화면을 띄우고 사람이 로그인할 때까지 기다린다. 비밀번호·인증번호는 앱이 다루지 않는다."""
-        self.open(self.urls.login)
-        self._log(f"Aside 창에서 {self.urls.label}에 로그인해 주세요.", shot=True)
+    def login(self, timeout: float, should_cancel: Callable[[], bool], choose: bool = False) -> dict:
+        """로그인 화면을 띄우고 사람이 로그인할 때까지 기다린다. 비밀번호·인증번호는 앱이 다루지 않는다.
+
+        choose=True 면 비즈프로필 고르기 화면부터 띄운다(한 로그인으로 여러 비즈프로필을 관리할 때).
+        그 화면을 거친 뒤에 들어간 비즈프로필을 고른 것으로 본다. 로그인이 풀려 있으면 로그인부터 하게 된다."""
+        self._saw_select = False
+        if choose:
+            self.open(f"{self.urls.base}/select_profile")
+            self._log("Aside 창에서 등록에 쓸 비즈프로필을 골라 주세요.", shot=True)
+        else:
+            self.open(self.urls.login)
+            self._log(f"Aside 창에서 {self.urls.label}에 로그인해 주세요.", shot=True)
         deadline = time.monotonic() + timeout
         session_seen_at = None
         hinted = False
@@ -309,6 +320,8 @@ class DaangnSite:
             if self.page.is_closed():
                 self.page = pages[0]
             found = self._find_biz()
+            if choose and not self._saw_select:       # 고르기 화면을 거치기 전의 비즈프로필 화면은 고른 것이 아니다
+                found = None
             if found and self._session is not False:
                 if candidate == found[1]:        # 두 번 연속 같은 주소에 머물러야 로그인으로 본다
                     self.page = found[0]

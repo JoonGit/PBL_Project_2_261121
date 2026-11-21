@@ -135,3 +135,38 @@ def test_remove_price_and_news_on_practice_site(tmp_path):
     assert [p["title"] for p in state["posts"]] == ["남길 소식 제목 둘"]
     assert submits == ["price", "news"]                                       # 이미 없는 것은 누르지 않는다
     assert any("삭제 확인 창" in m for m, _lv, _s in logs)                       # 소식 삭제의 확인 창을 눌렀다
+
+
+def test_choose_second_profile_on_practice_site(tmp_path):
+    """한 로그인으로 가게가 둘일 때: 고르기 화면에서 2호점을 고르면 그곳에 올라간다."""
+    server = PracticeServer(tmp_path / "data", free_port()).start()
+    headless = os.environ.get("FM_BROWSER_SHOW") != "1"
+    browser = AsideBrowser(ASIDE, tmp_path / "profile", free_port(), (80, 60, 1000, 860), headless=headless)
+    site = DaangnSite(browser, practice_urls(server.base_url), on_log=lambda m, lv, shot: None,
+                      action_delay=0.2, step_timeout=15, diagnostics_dir=tmp_path / "diagnostics")
+    photo = make_image(tmp_path / "a.png", size=(640, 480))
+    try:
+        def press_login() -> bool:
+            button = site.page.get_by_role("button", name="연습 계정으로 로그인")
+            if button.count() and button.first.is_visible():
+                button.first.click()
+            return False
+
+        assert site.login(60, press_login)["biz_id"] == "1001"
+        site.close()
+
+        def pick_second() -> bool:                       # 사람 대신 고르기 화면에서 2호점을 누른다
+            link = site.page.get_by_role("link", name="연습용 가게 2호점")
+            if link.count() and link.first.is_visible():
+                link.first.click()
+            return False
+
+        chosen = site.login(60, pick_second, choose=True)
+        assert chosen == {"biz_id": "1002", "biz_name": "연습용 가게 2호점", "public_id": "7002"}
+        site.register_price("1002", "2호점 상품", 5000, photo, before_submit=lambda: None)
+    finally:
+        site.close()
+        server.stop()
+    root = tmp_path / "data" / "practice"
+    assert [p["name"] for p in json.loads((root / "state-1002.json").read_text(encoding="utf-8"))["prices"]] == ["2호점 상품"]
+    assert not (root / "state.json").exists() or json.loads((root / "state.json").read_text(encoding="utf-8"))["prices"] == []

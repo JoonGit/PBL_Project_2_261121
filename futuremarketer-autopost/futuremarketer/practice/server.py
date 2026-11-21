@@ -26,6 +26,9 @@ from urllib.parse import parse_qs, urlparse
 BIZ_ID = "1001"
 BIZ_NAME = "연습용 가게"
 PUBLIC_ID = "7001"          # 손님이 보는 업체 프로필 번호(실제 화면처럼 비즈프로필 번호와 다르다)
+# 한 로그인으로 관리하는 비즈프로필이 여럿인 경우를 연습하려고 가게를 둘 둔다: 번호 → (이름, 손님이 보는 업체 번호)
+PROFILES = {BIZ_ID: (BIZ_NAME, PUBLIC_ID), "1002": ("연습용 가게 2호점", "7002")}
+MANAGER_RE = re.compile(r"^/biz_accounts/(\d+)/manager(/.*)?$")
 COOKIE = "practice_session=ok"
 MANAGER = f"/biz_accounts/{BIZ_ID}/manager"
 MAX_UPLOAD = 25 * 1024 * 1024
@@ -230,7 +233,8 @@ POST_BODY = NAV + """
 
 
 class PracticeState:
-    """가격·소식을 파일 하나에 기록한다. 지우려면 앱 데이터 폴더의 practice 를 지우면 된다."""
+    """가게마다 가격·소식을 파일 하나에 기록한다(첫 가게는 state.json, 다른 가게는 state-<번호>.json).
+    지우려면 앱 데이터 폴더의 practice 를 지우면 된다."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -239,16 +243,20 @@ class PracticeState:
         self.path = self.root / "state.json"
         self.lock = threading.Lock()
 
-    def load(self) -> dict:
+    def path_for(self, biz: str = BIZ_ID) -> Path:
+        return self.path if biz == BIZ_ID else self.root / f"state-{biz}.json"
+
+    def load(self, biz: str = BIZ_ID) -> dict:
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            return json.loads(self.path_for(biz).read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {"prices": [], "posts": []}
 
-    def save(self, data: dict) -> None:
-        tmp = self.path.with_name("state.json.tmp")
+    def save(self, data: dict, biz: str = BIZ_ID) -> None:
+        path = self.path_for(biz)
+        tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(self.path)
+        tmp.replace(path)
 
 
 def make_handler(state: PracticeState):
@@ -278,6 +286,13 @@ def make_handler(state: PracticeState):
         def _authed(self) -> bool:
             return COOKIE in (self.headers.get("Cookie") or "")
 
+        biz = BIZ_ID
+
+        def _cookie_biz(self) -> str:
+            """화면이 지금 보고 있는 가게(관리 화면을 열 때 쿠키로 남긴다). API 요청은 이 가게에 기록된다."""
+            match = re.search(r"practice_biz=(\d+)", self.headers.get("Cookie") or "")
+            return match[1] if match and match[1] in PROFILES else BIZ_ID
+
         def _body(self) -> bytes | None:
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_UPLOAD:
@@ -293,19 +308,25 @@ def make_handler(state: PracticeState):
         def do_GET(self):
             url = urlparse(self.path)
             path = url.path.rstrip("/") or "/"
+            self.biz = self._cookie_biz()
             if path == "/api/me":
-                return self._json({"biz_id": BIZ_ID, "name": BIZ_NAME}) if self._authed() else self._json({"error": "unauthorized"}, 401)
+                name = PROFILES[self.biz][0]
+                return self._json({"biz_id": self.biz, "name": name}) if self._authed() else self._json({"error": "unauthorized"}, 401)
             if path in ("/", "/login"):
                 if self._authed():
                     return self._redirect(f"{MANAGER}/home")
                 return self._send(200, page("로그인", LOGIN_BODY))
             if path == "/logout":
                 return self._redirect("/login", {"Set-Cookie": "practice_session=; Path=/; Max-Age=0"})
-            if path == f"/kr/local-profile/{PUBLIC_ID}":           # 손님이 보는 업체 프로필(로그인 없이 보인다)
-                return self._send(200, page(BIZ_NAME, f"<h1>{html.escape(BIZ_NAME)}</h1><p class=\"muted\">연습용 동네 업체</p>"
+            public = {pid: biz for biz, (_name, pid) in PROFILES.items()}
+            if path.startswith("/kr/local-profile/") and path.rsplit("/", 1)[1] in public:   # 손님이 보는 업체 프로필
+                self.biz = public[path.rsplit("/", 1)[1]]
+                name = PROFILES[self.biz][0]
+                return self._send(200, page(name, f"<h1>{html.escape(name)}</h1><p class=\"muted\">연습용 동네 업체</p>"
                                             + self._posts_html()))
             if path.startswith("/kr/business-posts/"):                   # 공유된 소식
-                post = next((p for p in state.load()["posts"] if p.get("id") == path.rsplit("/", 1)[1]), None)
+                post_id = path.rsplit("/", 1)[1]
+                post = next((p for biz in PROFILES for p in state.load(biz)["posts"] if p.get("id") == post_id), None)
                 if post is None:
                     return self._send(404, page("없는 소식", "<h1>페이지를 찾을 수 없어요</h1>"))
                 images = "".join(f'<img src="/kr/files/{html.escape(i)}" alt="">' for i in post.get("images", []))
@@ -322,7 +343,7 @@ def make_handler(state: PracticeState):
             if not self._authed():
                 return self._json({"error": "unauthorized"}, 401) if path.startswith("/api/") else self._redirect("/login")
             if path == "/api/state":
-                return self._json(state.load())
+                return self._json(state.load(self.biz))
             if path.startswith("/files/"):
                 name = path.split("/", 2)[2]
                 target = state.files / name
@@ -330,19 +351,37 @@ def make_handler(state: PracticeState):
                     return self._send(404, b"not found", "text/plain")
                 ctype = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}[name.rsplit(".", 1)[1]]
                 return self._send(200, target.read_bytes(), ctype)
-            if path == f"{MANAGER}/home":
-                return self._send(200, page("홈", self._home()))
-            if path == f"{MANAGER}/pricing":
-                return self._send(200, page("가격", PRICING_BODY, PRICING_SCRIPT))
-            if path == f"{MANAGER}/posts/new":
-                return self._send(200, page("소식 작성", POST_BODY, POST_SCRIPT))
-            if path == f"{MANAGER}/posts":
-                return self._send(200, page("소식", NAV + "<h1>소식</h1>" + self._posts_html(menu=True) + POSTS_MENU,
-                                            POSTS_SCRIPT))
+            if path == "/select_profile":                     # 이 로그인으로 관리하는 비즈프로필 고르기
+                links = "".join(f'<a class="card row" href="/biz_accounts/{biz}/manager/home"><strong>{html.escape(name)}</strong>'
+                                f'<span class="muted">ID {biz}</span></a>' for biz, (name, _pid) in PROFILES.items())
+                return self._send(200, page("비즈프로필 선택", "<h1>관리할 비즈프로필을 선택하세요</h1>" + links))
+            match = MANAGER_RE.match(path)
+            if match and match[1] in PROFILES and match[1] != BIZ_ID:    # 다른 가게: 같은 화면을 그 가게 주소로 보여 준다
+                self.biz = match[1]
+                inner = f"{MANAGER}{match[2] or ''}"
+                return self._manager(inner, f"/biz_accounts/{self.biz}/")
+            if match and match[1] == BIZ_ID:
+                self.biz = BIZ_ID
+                return self._manager(path, None)
             return self._send(404, page("없는 화면", NAV + "<h1>없는 화면입니다</h1>"))
 
+        def _manager(self, path: str, swap: str | None):
+            """관리 화면 하나. swap 이 있으면 화면 속 첫 가게 주소를 그 가게 주소로 바꿔 보낸다."""
+            routes = {f"{MANAGER}/home": lambda: page("홈", self._home()),
+                      f"{MANAGER}/pricing": lambda: page("가격", PRICING_BODY, PRICING_SCRIPT),
+                      f"{MANAGER}/posts/new": lambda: page("소식 작성", POST_BODY, POST_SCRIPT),
+                      f"{MANAGER}/posts": lambda: page("소식", NAV + "<h1>소식</h1>" + self._posts_html(menu=True)
+                                                       + POSTS_MENU, POSTS_SCRIPT)}
+            make = routes.get(path)
+            if make is None:
+                return self._send(404, page("없는 화면", NAV + "<h1>없는 화면입니다</h1>"))
+            body = make()
+            if swap:
+                body = body.replace(f"/biz_accounts/{BIZ_ID}/".encode(), swap.encode())
+            return self._send(200, body, headers={"Set-Cookie": f"practice_biz={self.biz}; Path=/; SameSite=Lax"})
+
         def _posts_html(self, menu: bool = False) -> str:
-            posts = state.load()["posts"]
+            posts = state.load(self.biz)["posts"]
             if not posts:
                 return '<p class="muted">아직 올린 소식이 없습니다.</p>'
             out = []
@@ -358,15 +397,16 @@ def make_handler(state: PracticeState):
             return "".join(out)
 
         def _home(self) -> str:
-            data = state.load()
+            data = state.load(self.biz)
             prices = "".join(
                 '<div class="card row item"><div class="pthumb">'
                 + (f'<img src="/files/{html.escape(p["image"])}" alt="">' if p.get("image") else "")
                 + f'</div><div class="grow"><p>{html.escape(p["name"])}</p><p class="muted">{html.escape(p.get("description") or "")}</p></div>'
                 f'<span>{int(p["price"]):,}원</span></div>'
                 for p in data["prices"]) or '<p class="muted">등록된 가격이 없습니다.</p>'
-            return (NAV + f'<h1 data-biz-name>{html.escape(BIZ_NAME)}</h1>'
-                    f'<button type="button" hidden data-log-click-params=\'{{"biz_id":"{BIZ_ID}","lp_id":"{PUBLIC_ID}"}}\'>프로필 가기</button>'
+            name, public_id = PROFILES[self.biz]
+            return (NAV + f'<h1 data-biz-name>{html.escape(name)}</h1>'
+                    f'<button type="button" hidden data-log-click-params=\'{{"biz_id":"{self.biz}","lp_id":"{public_id}"}}\'>프로필 가기</button>'
                     f'<h2>가격 {len(data["prices"])}개</h2>{prices}'
                     f'<h2>소식 {len(data["posts"])}개</h2>{self._posts_html()}'
                     '<p class="muted" style="margin-top:32px"><a href="/logout">연습 계정 로그아웃</a></p>')
@@ -375,6 +415,7 @@ def make_handler(state: PracticeState):
         def do_POST(self):
             url = urlparse(self.path)
             path = url.path.rstrip("/")
+            self.biz = self._cookie_biz()
             if not self._same_origin():
                 return self._json({"error": "forbidden"}, 403)
             body = self._body()
@@ -399,7 +440,7 @@ def make_handler(state: PracticeState):
                 return self._delete_post(payload)
             if path == "/api/reset":
                 with state.lock:
-                    state.save({"prices": [], "posts": []})
+                    state.save({"prices": [], "posts": []}, self.biz)
                 return self._json({"ok": True})
             return self._json({"error": "not found"}, 404)
 
@@ -440,19 +481,19 @@ def make_handler(state: PracticeState):
                 clean.append({"name": name, "price": price, "description": str(item.get("description") or "")[:50],
                               "image": image, "created_at": item.get("created_at") or now, "updated_at": now})
             with state.lock:
-                data = state.load()
+                data = state.load(self.biz)
                 data["prices"] = clean
-                state.save(data)
+                state.save(data, self.biz)
             return self._json(data)
 
         def _delete_post(self, payload: dict):
             index = payload.get("index")
             with state.lock:
-                data = state.load()
+                data = state.load(self.biz)
                 if not isinstance(index, int) or not 0 <= index < len(data["posts"]):
                     return self._json({"error": "no such post"}, 404)
                 data["posts"].pop(index)
-                state.save(data)
+                state.save(data, self.biz)
             return self._json({"ok": True, "count": len(data["posts"])})
 
         def _save_post(self, payload: dict):
@@ -462,11 +503,11 @@ def make_handler(state: PracticeState):
             if len(title) < 2 or len(body) < 10:
                 return self._json({"error": "too short"}, 400)
             with state.lock:
-                data = state.load()
+                data = state.load(self.biz)
                 post_id = secrets.token_hex(12)
                 data["posts"].append({"id": post_id, "title": title, "body": body, "images": images,
                                       "created_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-                state.save(data)
+                state.save(data, self.biz)
             return self._json({"ok": True, "id": post_id, "count": len(data["posts"])})
 
     return Handler

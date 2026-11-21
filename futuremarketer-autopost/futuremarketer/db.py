@@ -42,7 +42,7 @@ def session_scope(engine: Engine) -> Iterator[Session]:
         session.close()
 
 
-JSON_COLUMNS = {"data_issues_json", "steps_json", "request_json", "result_json"}
+JSON_COLUMNS = {"data_issues_json", "steps_json", "request_json", "result_json", "profiles_json"}
 
 
 def row_to_dict(row) -> dict | None:

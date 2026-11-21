@@ -17,7 +17,7 @@ from .defaults import DEFAULT_PROMPTS
 from .util import new_id, utcnow
 
 SCHEMA_PATH = PROJECT_ROOT / "db" / "schema.sql"
-SCHEMA_VERSION = "schema:5"      # db/schema.sql 의 channel_connection COMMENT 와 같아야 한다
+SCHEMA_VERSION = "schema:6"      # db/schema.sql 의 channel_connection COMMENT 와 같아야 한다
 
 
 def _existing(engine: Engine) -> set[str]:
@@ -104,7 +104,23 @@ def _migrate_4_to_5(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE channel_connection COMMENT = 'schema:5'"))
 
 
-MIGRATIONS = {"schema:3": _migrate_3_to_4, "schema:4": _migrate_4_to_5}     # 이 판이면 → 이 함수로 다음 판으로 올린다(데이터는 그대로)
+def _migrate_5_to_6(engine: Engine) -> None:
+    """비즈프로필이 여럿일 때 고를 수 있게: 고르기 요청(SELECT)과, 골라 본 비즈프로필 목록 칸을 더한다."""
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE channel_connection MODIFY control_action ENUM('CONNECT','DISCONNECT','SELECT') NULL"
+                          " COMMENT 'SELECT: 같은 로그인으로 다른 비즈프로필 고르기'"))
+    if "profiles_json" not in _columns(engine, "channel_connection"):
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE channel_connection ADD COLUMN profiles_json JSON NULL"
+                              " COMMENT '이 로그인으로 골라 본 비즈프로필들 [{biz_id, biz_name, public_id}]' AFTER public_id"))
+    with engine.begin() as conn:
+        # 지금 연결된 비즈프로필을 목록의 첫 줄로 채운다
+        conn.execute(text("UPDATE channel_connection SET profiles_json = JSON_ARRAY(JSON_OBJECT('biz_id', biz_id,"
+                          " 'biz_name', biz_name, 'public_id', public_id)) WHERE biz_id IS NOT NULL AND profiles_json IS NULL"))
+        conn.execute(text("ALTER TABLE channel_connection COMMENT = 'schema:6'"))
+
+
+MIGRATIONS = {"schema:3": _migrate_3_to_4, "schema:4": _migrate_4_to_5, "schema:5": _migrate_5_to_6}     # 이 판이면 → 이 함수로 다음 판으로 올린다(데이터는 그대로)
 
 
 def ensure_schema(engine: Engine, target: str = "REAL") -> str:

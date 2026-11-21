@@ -45,6 +45,44 @@ def request_connect(engine) -> dict:
     return _request_control(engine, "CONNECT")
 
 
+def request_select(engine) -> dict:
+    """「다른 비즈프로필 고르기」: 같은 로그인으로 관리하는 비즈프로필 목록을 Aside 창에 띄워 사람이 고르게 한다."""
+    with session_scope(engine) as s:
+        if core.connection(s)["status"] != "CONNECTED":
+            raise DomainError("NOT_READY", "당근 계정을 먼저 연결해 주세요.")
+    return _request_control(engine, "SELECT")
+
+
+def known_profiles(conn: dict) -> list[dict]:
+    """이 로그인으로 골라 본 비즈프로필들(지금 연결된 것 포함, 중복 없이)."""
+    out, seen = [], set()
+    current = {"biz_id": conn["biz_id"], "biz_name": conn["biz_name"], "public_id": conn.get("public_id")}
+    for item in ([current] if conn["biz_id"] else []) + list(conn.get("profiles_json") or []):
+        if item.get("biz_id") and str(item["biz_id"]) not in seen:
+            seen.add(str(item["biz_id"]))
+            out.append({"biz_id": str(item["biz_id"]), "biz_name": item.get("biz_name"), "public_id": item.get("public_id")})
+    return out
+
+
+def switch_profile(engine, biz_id: str) -> dict:
+    """이미 골라 본 비즈프로필 가운데 하나로 바꾼다. 같은 로그인이라 브라우저를 열지 않는다.
+    상품의 「등록 완료」 기록은 비즈프로필마다 따로라, 바꾼 곳에서는 다시 등록할 수 있다."""
+    with session_scope(engine) as s:
+        conn = core.connection(s, lock=True)
+        if conn["status"] != "CONNECTED":
+            raise DomainError("NOT_READY", "당근 계정을 먼저 연결해 주세요.")
+        if conn["control_status"] in ("REQUESTED", "RUNNING"):
+            raise DomainError("BUSY", "이미 브라우저 작업이 진행 중입니다. 잠시 뒤 다시 시도하세요.")
+        if fetch_one(s, "SELECT id FROM task_job WHERE status IN ('QUEUED','RUNNING','NEEDS_CHECK') LIMIT 1"):
+            raise DomainError("BUSY", "진행 중이거나 확인을 기다리는 작업이 있습니다. 정리한 뒤에 바꿔 주세요.")
+        target = next((p for p in known_profiles(conn) if p["biz_id"] == str(biz_id)), None)
+        if target is None:
+            raise DomainError("CONFLICT", "고른 적 없는 비즈프로필입니다. 「다른 비즈프로필 고르기」로 먼저 골라 주세요.")
+        execute(s, "UPDATE channel_connection SET biz_id=:b, biz_name=:n, public_id=:p, updated_at=:now WHERE id=1",
+                b=target["biz_id"], n=target["biz_name"], p=target["public_id"], now=utcnow())
+        return target
+
+
 def request_disconnect(engine) -> dict:
     """「연결 해제」: 워커에게 저장된 로그인 정보를 지워 달라고 한다."""
     return _request_control(engine, "DISCONNECT")
@@ -59,6 +97,10 @@ def cancel_connect(engine) -> None:
             execute(s, "UPDATE channel_connection SET status=:st, control_status='FAILED', control_token=NULL,"
                        " control_message='연결을 취소했습니다.', control_updated_at=:now, updated_at=:now WHERE id=1",
                     st="EXPIRED" if conn["biz_id"] else "DISCONNECTED", now=now)
+        elif conn["control_action"] == "SELECT" and conn["control_status"] in ("REQUESTED", "RUNNING"):
+            execute(s, "UPDATE channel_connection SET control_status='FAILED', control_token=NULL,"
+                       " control_message='비즈프로필 고르기를 취소했습니다. 연결은 그대로입니다.', control_updated_at=:now,"
+                       " updated_at=:now WHERE id=1", now=now)
 
 
 def sync_target(engine, target_code: str) -> bool:
@@ -71,7 +113,7 @@ def sync_target(engine, target_code: str) -> bool:
         conn = core.connection(s, lock=True)
         if conn["target"] == target_code:
             return False
-        execute(s, "UPDATE channel_connection SET target=:tg, status='DISCONNECTED', biz_id=NULL, biz_name=NULL, public_id=NULL,"
+        execute(s, "UPDATE channel_connection SET target=:tg, status='DISCONNECTED', biz_id=NULL, biz_name=NULL, public_id=NULL, profiles_json=NULL,"
                    " connected_at=NULL, verified_at=NULL, control_action=NULL, control_token=NULL,"
                    " control_status=NULL, control_message=NULL, updated_at=:now WHERE id=1",
                 tg=target_code, now=utcnow())

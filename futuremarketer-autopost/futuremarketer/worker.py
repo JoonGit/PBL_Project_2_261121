@@ -180,8 +180,8 @@ class Worker:
                 return True
             execute(s, "UPDATE channel_connection SET control_status='RUNNING', control_message=:m, control_updated_at=:now"
                        " WHERE id=1", m="브라우저를 준비하고 있습니다.", now=now)
-        if action == "CONNECT":
-            self._run_connect(token)
+        if action in ("CONNECT", "SELECT"):
+            self._run_connect(token, choose=action == "SELECT")
         else:
             self._run_disconnect(token)
         return True
@@ -200,13 +200,23 @@ class Worker:
         with session_scope(self.engine) as s:
             return core.connection(s)["control_token"]
 
-    def _run_connect(self, token: str) -> None:
+    @staticmethod
+    def _merge_profiles(conn: dict, result: dict) -> list[dict]:
+        """골라 본 비즈프로필 목록에 방금 고른 것을 더하거나 고친다."""
+        chosen = {"biz_id": str(result["biz_id"]), "biz_name": result.get("biz_name"), "public_id": result.get("public_id")}
+        out = [chosen]
+        for item in settings_service.known_profiles(conn):
+            if item["biz_id"] != chosen["biz_id"]:
+                out.append(item)
+        return out[:20]
+
+    def _run_connect(self, token: str, choose: bool = False) -> None:
         self._close_site()
         site = None
         result, failure = None, None
         try:
             site = self._site_factory(lambda message, level, shot: self._control_message(token, message))
-            result = site.login(self.settings.login_timeout_sec, lambda: self._control_token() != token)
+            result = site.login(self.settings.login_timeout_sec, lambda: self._control_token() != token, choose=choose)
         except (SiteError, BrowserError) as exc:
             failure = getattr(exc, "message", None) or str(exc)
         except Exception as exc:
@@ -225,16 +235,17 @@ class Worker:
             elif result:
                 # 다른 비즈프로필로 바꿔 연결했으면 앞 업체의 프로필 번호를 남기지 않는다(public_id 를 biz_id 보다 먼저 정한다)
                 execute(s, "UPDATE channel_connection SET public_id=IF(biz_id <=> :b, COALESCE(:pub, public_id), :pub),"
-                           " status='CONNECTED', target=:tg, biz_id=:b, biz_name=:n,"
+                           " profiles_json=:profiles, status='CONNECTED', target=:tg, biz_id=:b, biz_name=:n,"
                            " connected_at=:now, verified_at=:now, control_status='DONE', control_message='연결되었습니다.',"
                            " control_updated_at=:now, updated_at=:now WHERE id=1",
                         tg=self.settings.target_code, b=str(result["biz_id"]), n=result.get("biz_name"),
-                        pub=result.get("public_id"), now=now)
-            else:
-                cleanup = not conn["biz_id"]
+                        pub=result.get("public_id"), profiles=dumps(self._merge_profiles(conn, result)), now=now)
+            else:                       # 고르기가 실패해도 지금 연결은 그대로 둔다
+                cleanup = not conn["biz_id"] and not choose
                 execute(s, "UPDATE channel_connection SET status=:st, control_status='FAILED', control_message=:m,"
                            " control_updated_at=:now, updated_at=:now WHERE id=1",
-                        st=self._fallback_status(conn), m=(failure or "연결하지 못했습니다.")[:500], now=now)
+                        st=conn["status"] if choose else self._fallback_status(conn),
+                        m=(failure or ("비즈프로필을 고르지 못했습니다." if choose else "연결하지 못했습니다."))[:500], now=now)
         if cleanup:
             with contextlib.suppress(Exception):
                 self._profile_remover(self.settings.browser_profile_dir)
@@ -252,7 +263,7 @@ class Worker:
         now = utcnow()
         with session_scope(self.engine) as s:
             if removed:
-                execute(s, "UPDATE channel_connection SET status='DISCONNECTED', biz_id=NULL, biz_name=NULL, public_id=NULL,"
+                execute(s, "UPDATE channel_connection SET status='DISCONNECTED', biz_id=NULL, biz_name=NULL, public_id=NULL, profiles_json=NULL,"
                            " connected_at=NULL, verified_at=NULL, control_status='DONE',"
                            " control_message='연결을 해제하고 저장된 로그인 정보를 지웠습니다.', control_updated_at=:now,"
                            " updated_at=:now WHERE id=1 AND control_token=:t", now=now, t=token)

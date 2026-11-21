@@ -55,6 +55,22 @@ def _keep() -> None:
     st.session_state["confirm_disconnect"] = False
 
 
+def _select_profile() -> None:
+    try:
+        common.start_worker()
+        settings_service.request_select(common.engine())
+    except Exception as exc:
+        common.flash(common.error_text(exc), "error")
+
+
+def _switch_profile(biz_id: str) -> None:
+    try:
+        target = settings_service.switch_profile(common.engine(), biz_id)
+        common.flash(f"{target['biz_name'] or '비즈프로필'}(ID {target['biz_id']})에 등록하도록 바꿨습니다.")
+    except Exception as exc:
+        common.flash(common.error_text(exc), "error")
+
+
 def _daangn_body() -> None:
     cfg = common.settings()
     conn = _overview()["connection"]
@@ -81,16 +97,26 @@ def _daangn_body() -> None:
         else:
             st.html(f'<p class="fm-note">버튼을 누르면 Aside 창에 {where} 로그인 화면이 뜹니다. '
                     '로그인을 마치면 창이 닫히고, 이후 등록은 그 로그인으로 진행합니다.</p>')
+        profiles = settings_service.known_profiles(conn) if status == "CONNECTED" else []
+        if len(profiles) > 1 and not busy:
+            names = {p["biz_id"]: f'{p["biz_name"] or "비즈프로필"} (ID {p["biz_id"]})' for p in profiles}
+            pick, go = st.columns([3, 1.4], vertical_alignment="bottom")
+            chosen = pick.selectbox("등록할 비즈프로필", list(names), format_func=names.get, key="biz_pick",
+                                    index=list(names).index(conn["biz_id"]) if conn["biz_id"] in names else 0)
+            go.button("이 프로필로 바꾸기", on_click=_switch_profile, args=(chosen,), width="stretch",
+                      disabled=chosen == conn["biz_id"])
         if conn["control_status"] == "FAILED" and conn["control_message"] and not busy:
             st.html(f'<p class="fm-why bad">{common.esc(conn["control_message"])}</p>')
         elif status == "DISCONNECTED" and conn["control_action"] == "DISCONNECT" and conn["control_status"] == "DONE":
             st.html(f'<p class="fm-why">{common.esc(conn["control_message"] or "")}</p>')
     with action:
-        if busy and conn["control_action"] == "CONNECT":
+        if busy and conn["control_action"] in ("CONNECT", "SELECT"):
             st.button("연결 취소", on_click=_cancel_connect, width="stretch")
         elif busy:
             st.button("처리 중", disabled=True, width="stretch")
         elif status == "CONNECTED":
+            st.button("다른 비즈프로필 고르기", on_click=_select_profile, width="stretch", icon=":material/swap_horiz:",
+                      help="한 로그인으로 비즈프로필을 여러 개 관리할 때. Aside 창에 비즈프로필 목록이 뜹니다.")
             if st.session_state.get("confirm_disconnect"):
                 st.html('<p class="fm-note">이 컴퓨터에 저장된 로그인 정보를 지웁니다.</p>')
                 yes, no = st.columns(2)

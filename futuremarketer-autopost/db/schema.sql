@@ -10,10 +10,11 @@ CREATE TABLE channel_connection (
   biz_id               VARCHAR(40)  NULL COMMENT '로그인 뒤 고른 비즈프로필 번호',
   biz_name             VARCHAR(100) NULL,
   public_id            VARCHAR(40)  NULL COMMENT '손님이 보는 당근 업체 프로필 번호(동네 업체 번호)',
+  profiles_json        JSON         NULL COMMENT '이 로그인으로 골라 본 비즈프로필들 [{biz_id, biz_name, public_id}]',
   connected_at         DATETIME(6)  NULL,
   verified_at          DATETIME(6)  NULL,
   -- 화면이 남기는 브라우저 제어 요청. 브라우저는 워커만 연다.
-  control_action       ENUM('CONNECT','DISCONNECT') NULL,
+  control_action       ENUM('CONNECT','DISCONNECT','SELECT') NULL COMMENT 'SELECT: 같은 로그인으로 다른 비즈프로필 고르기',
   control_token        CHAR(36)     NULL,
   control_status       ENUM('REQUESTED','RUNNING','DONE','FAILED') NULL,
   control_message      VARCHAR(500) NULL,
@@ -22,7 +23,7 @@ CREATE TABLE channel_connection (
   updated_at           DATETIME(6)  NOT NULL,
   PRIMARY KEY (id),
   CONSTRAINT ck_connection_single CHECK (id = 1)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='schema:5';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='schema:6';
 
 -- AI 연결 방식만 저장한다. API 키는 DB 에 넣지 않는다(프로젝트 밖 비밀 파일).
 CREATE TABLE ai_connection (
