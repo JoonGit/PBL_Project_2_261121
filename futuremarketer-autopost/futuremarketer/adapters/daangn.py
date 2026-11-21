@@ -32,7 +32,7 @@ NEWS_TITLE_MAX = 30        # 소식 제목 칸은 30자까지
 NEWS_IMAGE_MAX = 10        # 소식 사진은 10장까지
 UPLOAD_IMAGE_LIMIT = 7_000_000
 RESTRICTION_TEXT = re.compile(r"비즈프로필이 제재되어 이용할 수 없|운영정책을 위반해 활동이 제한")
-PRICE_ACCESS_TEXT = re.compile(r"권한이\s*(?:없|필요)|접근할 수 없")
+PRICE_ACCESS_TEXT = re.compile(r"권한이\s*(?:없|필요)|접근할 수 없|비즈프로필이 제재되어 이용할 수 없")
 PHOTO_COUNTER = re.compile(r"^\s*\d+\s*/\s*10\s*$")     # 소식 사진 버튼에 보이는 「0/10」
 SORTABLE = '[aria-roledescription="sortable"]'           # 소식에 붙인 사진 하나하나(끌어서 순서를 바꾸는 칸)
 
@@ -544,7 +544,7 @@ class DaangnSite:
         self._goto(pricing_url)
         self._ensure_authed()
         location, expected = urlsplit(self.page.url), urlsplit(pricing_url)
-        restricted = self.page.get_by_text(RESTRICTION_TEXT).or_(self.page.get_by_text(PRICE_ACCESS_TEXT))
+        restricted = self.page.get_by_text(PRICE_ACCESS_TEXT)
         if ((location.netloc, location.path.rstrip("/")) != (expected.netloc, expected.path)
                 or self._visible(restricted)):
             raise SiteError("PREVIEW_ONLY", "게시 보류 · 선택한 비즈프로필의 가격표 작성 화면을 이용할 수 없습니다.")

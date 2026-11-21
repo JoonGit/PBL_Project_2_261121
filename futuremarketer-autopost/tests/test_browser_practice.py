@@ -61,6 +61,16 @@ def test_login_price_and_news_on_practice_site(tmp_path):
 
         assert site.is_logged_in("1001") is True    # 다시 열면 로그인이 유지된다(쿠키가 프로필에 남음)
         assert site.business_verification("1001") == "VERIFIED"
+        original_goto = site._goto
+
+        def goto_with_activity_notice(url):
+            original_goto(url)
+            if url.endswith("/pricing"):
+                site.page.evaluate("""() => document.body.insertAdjacentHTML(
+                    "afterbegin", "<p>운영정책을 위반해 활동이 제한되어 있어요.</p>"
+                )""")
+
+        site._goto = goto_with_activity_notice
         name = "수달 3IN1 멀티 강아지 장난감"            # 16자: 항목 칸(15자)에 맞춰 줄이고 전체 이름은 추가 설명에
         first = site.register_price("1001", name, 24900, photos[0], before_submit=lambda: submits.append("price"))
         assert first == {"action": "ADDED", "item_name": "수달 3IN1 멀티 강아지", "photo": True}
