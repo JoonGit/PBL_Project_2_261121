@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import contextlib
 import re
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 from urllib.parse import urlsplit
+
+from PIL import Image, ImageOps
 
 from ..content import fit_text
 
@@ -27,6 +30,7 @@ PRICE_NAME_MAX = 15        # 가격 항목 이름 칸은 15자까지 받는다
 PRICE_NOTE_MAX = 50        # 가격 추가 설명 칸은 50자까지
 NEWS_TITLE_MAX = 30        # 소식 제목 칸은 30자까지
 NEWS_IMAGE_MAX = 10        # 소식 사진은 10장까지
+UPLOAD_IMAGE_LIMIT = 7_000_000
 RESTRICTION_TEXT = re.compile(r"비즈프로필이 제재되어 이용할 수 없|운영정책을 위반해 활동이 제한")
 PHOTO_COUNTER = re.compile(r"^\s*\d+\s*/\s*10\s*$")     # 소식 사진 버튼에 보이는 「0/10」
 SORTABLE = '[aria-roledescription="sortable"]'           # 소식에 붙인 사진 하나하나(끌어서 순서를 바꾸는 칸)
@@ -76,6 +80,35 @@ class SiteError(Exception):
         self.message = message
         self.unknown = unknown
         self.definite = definite
+
+
+@contextlib.contextmanager
+def _upload_files(paths: list[Path]) -> Iterator[list[str]]:
+    """당근에 보낼 7MB 이상의 사진만 임시 JPEG로 줄인다."""
+    with contextlib.ExitStack() as cleanup:
+        folder = None
+        files = []
+        for index, path in enumerate(paths):
+            try:
+                if path.stat().st_size < UPLOAD_IMAGE_LIMIT:
+                    files.append(str(path))
+                    continue
+                if folder is None:
+                    folder = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix="fm-upload-")))
+                output = folder / f"{index}-{path.stem}.jpg"
+                with Image.open(path) as source:
+                    image = ImageOps.exif_transpose(source)
+                    image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+                    image = image.convert("RGBA")
+                    jpeg = Image.new("RGB", image.size, "white")
+                    jpeg.paste(image, mask=image.getchannel("A"))
+                    jpeg.save(output, format="JPEG", quality=88, optimize=True)
+                if output.stat().st_size >= UPLOAD_IMAGE_LIMIT:
+                    raise SiteError("UPLOAD_FAILED", f"사진을 7MB 미만으로 줄이지 못했습니다: {path.name}")
+            except (OSError, ValueError, Image.DecompressionBombError) as exc:
+                raise SiteError("UPLOAD_FAILED", f"업로드할 사진을 준비하지 못했습니다: {path.name}") from exc
+            files.append(str(output))
+        yield files
 
 
 LogFn = Callable[[str, str, bytes | None], None]
@@ -458,17 +491,18 @@ class DaangnSite:
             return False
         button = self._find("가격 사진 버튼", lambda p: dialog.locator(
             "xpath=.//*[self::h2 or self::h3 or self::h4][normalize-space()='사진']/following::button[1]"))
-        try:
-            with self.page.expect_file_chooser(timeout=8000) as chooser:
-                button.click()
-            chooser.value.set_files(str(image_path))
-        except PlaywrightTimeout:
-            saved = self._diagnose("가격사진")
-            raise SiteError("ELEMENT_NOT_FOUND", f"가격 사진을 고르는 창이 열리지 않았습니다.{saved}") from None
-        self._log("가격 항목에 상품 사진을 올리는 중입니다.")
-        if not self._wait_until(lambda: self._visible(dialog.locator('img[alt="가격 이미지"]')), timeout=90):
-            saved = self._diagnose("가격사진_업로드")
-            raise SiteError("UPLOAD_TIMEOUT", f"가격 사진 올리기가 끝나지 않았습니다.{saved}")
+        with _upload_files([image_path]) as files:
+            try:
+                with self.page.expect_file_chooser(timeout=8000) as chooser:
+                    button.click()
+                chooser.value.set_files(files)
+            except PlaywrightTimeout:
+                saved = self._diagnose("가격사진")
+                raise SiteError("ELEMENT_NOT_FOUND", f"가격 사진을 고르는 창이 열리지 않았습니다.{saved}") from None
+            self._log("가격 항목에 상품 사진을 올리는 중입니다.")
+            if not self._wait_until(lambda: self._visible(dialog.locator('img[alt="가격 이미지"]')), timeout=90):
+                saved = self._diagnose("가격사진_업로드")
+                raise SiteError("UPLOAD_TIMEOUT", f"가격 사진 올리기가 끝나지 않았습니다.{saved}")
         return True
 
     @staticmethod
@@ -585,10 +619,13 @@ class DaangnSite:
         return self.page.locator(f"{SORTABLE} img").count()
 
     def _attach_images(self, paths: list[Path]) -> None:
+        with _upload_files(paths) as files:
+            self._attach_upload_files(files)
+
+    def _attach_upload_files(self, files: list[str]) -> None:
         """사진 버튼 → 「사진 추가」 창의 「내 앨범에서 선택」 → 파일 고르기. 다 올라갈 때까지 기다린다."""
         from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-        files = [str(p) for p in paths]
         button = self._find("사진 추가 버튼",
                             lambda p: p.locator("button").filter(has_text=PHOTO_COUNTER),
                             lambda p: p.get_by_role("button", name=re.compile("사진 ?(첨부|추가)")),

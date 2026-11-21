@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import socket
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from futuremarketer.adapters.aside import AsideBrowser, remove_profile
 from futuremarketer.adapters.daangn import DaangnSite, practice_urls
@@ -39,6 +41,11 @@ def test_login_price_and_news_on_practice_site(tmp_path):
     site = DaangnSite(browser, practice_urls(server.base_url), on_log=lambda m, lv, shot: logs.append((m, lv, bool(shot))),
                       action_delay=0.2, step_timeout=15, diagnostics_dir=tmp_path / "diagnostics")
     photos = [make_image(tmp_path / "a.png", size=(640, 480)), make_image(tmp_path / "b.png", (200, 40, 40), size=(640, 480))]
+    dimensions = (1800, 1500)
+    pixels = random.Random(0).randbytes(dimensions[0] * dimensions[1] * 3)
+    Image.frombytes("RGB", dimensions, pixels).save(photos[0])
+    source_size = photos[0].stat().st_size
+    assert source_size >= 7_000_000
     body = "수달 장난감을 소개합니다.\n\n- 터그놀이\n- 노즈워크\n\n판매가격: 24,900원"
     submits: list[str] = []
     try:
@@ -85,6 +92,13 @@ def test_login_price_and_news_on_practice_site(tmp_path):
     post = state["posts"][0]
     assert post["title"] == result["title"] and len(post["title"]) <= 30 and post["title"] != long_title
     assert post["body"] == body and len(post["images"]) == 2
+    uploads = tmp_path / "data" / "practice" / "files"
+    for filename in (price["image"], post["images"][0]):
+        assert (uploads / filename).stat().st_size < 7_000_000
+        with Image.open(uploads / filename) as image:
+            assert image.format == "JPEG" and image.size == dimensions
+    assert (uploads / post["images"][1]).read_bytes() == photos[1].read_bytes()
+    assert photos[0].stat().st_size == source_size
     assert submits == ["price", "price2", "news"]
     messages = [m for m, _lv, _shot in logs]
     assert any("새로 쓰기" in m for m in messages)                  # 「작성 중인 소식이 있어요」를 닫았다
