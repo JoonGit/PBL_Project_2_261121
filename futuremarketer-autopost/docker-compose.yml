@@ -1,0 +1,28 @@
+# 로컬 개발용 MySQL 8.4 (호스트 127.0.0.1:3317 → 컨테이너 3306)
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: fm-autopost-mysql
+    restart: unless-stopped   # Docker Desktop 을 다시 켜면 MySQL 도 같이 켜진다
+    environment:
+      MYSQL_ROOT_PASSWORD: ${FM_MYSQL_ROOT_PASSWORD:-fm_root_local}
+      MYSQL_DATABASE: futuremarketer
+      MYSQL_USER: fm_app
+      MYSQL_PASSWORD: ${FM_MYSQL_PASSWORD:-fm_app_local}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    ports:
+      - "127.0.0.1:3317:3306"
+    volumes:
+      - fm_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${FM_MYSQL_ROOT_PASSWORD:-fm_root_local}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  fm_mysql_data:

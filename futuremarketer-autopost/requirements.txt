@@ -1,0 +1,12 @@
+# Python 3.12 기준. 설치 후 `pip freeze > requirements.lock` 으로 실제 버전을 고정할 수 있다.
+streamlit>=1.50,<2
+SQLAlchemy>=2.0,<2.1
+PyMySQL>=1.1,<2
+cryptography>=42
+openpyxl>=3.1,<4
+Pillow>=10.4
+python-dotenv>=1.0
+playwright>=1.48
+anthropic>=0.70
+openai>=1.60
+pytest>=8

@@ -1,0 +1,38 @@
+[server]
+address = "127.0.0.1"
+port = 8501
+headless = true
+enableXsrfProtection = true
+enableCORS = true
+enableStaticServing = false
+maxUploadSize = 20
+
+[browser]
+serverAddress = "127.0.0.1"
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+# 화면 톤: 밝은 회색 바탕, 흰 카드, 먹색 글자, 주황은 가장 중요한 버튼과 진행 중 표시에만.
+[theme]
+base = "light"
+primaryColor = "#FF5F1F"
+backgroundColor = "#F7F7F8"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1B1B1D"
+linkColor = "#B93C07"
+borderColor = "#E4E4E7"
+showWidgetBorder = true
+baseRadius = "0.625rem"
+buttonRadius = "0.625rem"
+baseFontSize = 15
+font = "Pretendard Variable:https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css, sans-serif"
+headingFontSizes = ["1.75rem", "1.125rem", "1rem"]
+headingFontWeights = [700, 600, 600]
+
+[theme.sidebar]
+backgroundColor = "#1B1B1D"
+secondaryBackgroundColor = "#2A2A2D"
+textColor = "#F2F2F3"
+borderColor = "#343437"
