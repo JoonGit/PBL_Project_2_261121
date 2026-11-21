@@ -1,6 +1,9 @@
 """상품 등록: 엑셀 불러오기 → 목록에서 고르기 → 한 번에 등록 → 진행 과정 보기."""
 from __future__ import annotations
 
+from base64 import b64encode
+from pathlib import Path
+
 import streamlit as st
 
 from futuremarketer.services import import_service, query_service, register_service
@@ -112,6 +115,47 @@ def _load_block(has_products: bool) -> None:
 
 
 # --- 목록 --------------------------------------------------------------------
+@st.dialog("상품 사진", width="large")
+def _image_preview(image_key: str, name: str) -> None:
+    with st.container(key="register_image_preview"):
+        st.html("""
+            <style>
+            .st-key-register_image_preview [data-testid="stImage"] img {
+                max-height: 72vh;
+                object-fit: contain;
+            }
+            </style>
+        """)
+        if common.store().exists(image_key):
+            st.image(str(common.store().path_for(image_key)), caption=name, width="stretch")
+        else:
+            st.info("사진 파일을 찾을 수 없습니다.")
+
+
+def _image_button(thumbnail: str, image_key: str, name: str, *, key: str, width: int) -> None:
+    encoded = b64encode(Path(thumbnail).read_bytes()).decode("ascii")
+    st.html(f"""
+        <style>
+        .st-key-{key} button {{
+            width: min(100%, {width}px);
+            min-height: 0;
+            aspect-ratio: 1;
+            padding: 0;
+            background: center / contain no-repeat url("data:image/jpeg;base64,{encoded}");
+        }}
+        .st-key-{key} button p {{
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip-path: inset(50%);
+        }}
+        </style>
+    """)
+    if st.button("상품 사진 크게 보기", key=key, help=f"{name} 사진 크게 보기"):
+        _image_preview(image_key, name)
+
+
 def _row_text(row: dict) -> str:
     text = "글 대본 그대로" if row["has_script"] else "글 Claude 작성"
     if row["local_images"]:
@@ -147,7 +191,7 @@ def _row(row: dict) -> None:
         with img:
             path = common.thumb(row["thumb_key"])
             if path:
-                st.image(path, width=48)
+                _image_button(path, row["thumb_key"], row["name"], key=f"product_photo_{row['id']}", width=48)
             else:
                 st.html('<div class="fm-noimg">없음</div>')
         main.html(_row_text(row))
@@ -160,9 +204,11 @@ def _row(row: dict) -> None:
                 st.text(preview["title"])
                 if preview["body"]:
                     st.text(preview["body"])
-                files = [str(common.store().path_for(key)) for key in preview["image_keys"] if common.store().exists(key)]
-                if files:
-                    st.image(files, width=220)
+                for index, key in enumerate(preview["image_keys"]):
+                    path = common.preview(key, width=220)
+                    if path:
+                        _image_button(path, key, f"{row['name']} · 사진 {index + 1}",
+                                      key=f"draft_photo_{row['id']}_{index}", width=160)
         if row["state"] == "NEEDS_CHECK" and job:
             _a, yes, no = st.columns([1.35, 2.2, 2.2])
             yes.button("당근에 올라가 있음", key=f"ok_{job['id']}", on_click=_resolve, args=(job["id"], "DONE"), width="stretch")

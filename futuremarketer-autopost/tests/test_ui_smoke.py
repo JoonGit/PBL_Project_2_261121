@@ -72,6 +72,11 @@ def test_pages_render_empty_and_filled(app_env, engine, store, settings, secrets
     assert job_count(engine) == 0      # 작업은 생기지 않는다(버튼을 눌러야만 접수)
     boxes = [c for c in at.checkbox if c.key and c.key.startswith("sel_") and c.key != "sel_all"]
     assert [c.disabled for c in boxes] == [False, True]
+    preview = next(b for b in at.button if b.label == "상품 사진 크게 보기")
+    preview.click().run()
+    assert not at.exception, at.exception
+    assert len(at.get("image") or at.get("imgs")) == 1
+    assert job_count(engine) == 0
     boxes[0].check().run()
     register = next(b for b in at.button if "등록" in b.label and "선택한 1개" in b.label)
     register.click().run()

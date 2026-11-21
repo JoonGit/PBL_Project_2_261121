@@ -32,14 +32,22 @@
 
 | 항목 | 설명 |
 |---|---|
-| macOS | 지금은 macOS 에서 만들고 확인했습니다(Aside 실행 위치, 개인 폴더 위치가 macOS 기준). |
-| Python 3.12 | `python3.12 --version` 으로 확인. 없으면 python.org 설치본이나 `brew install python@3.12`, `uv python install 3.12` 중 편한 것으로. |
-| Docker Desktop | MySQL 8.4 를 띄웁니다. 설치 후 **켜 둔 상태**여야 합니다. |
-| Aside 브라우저 | `/Applications/Aside.app` 에 설치. 다른 위치면 `.env` 의 `FM_ASIDE_PATH` 에 실행 파일 경로를 적습니다. |
+| 운영체제 | 프로젝트의 설치와 자동 등록은 macOS에서 확인했습니다. Windows에서 Aside 브라우저는 설치할 수 있습니다. 프로젝트 워커는 macOS에서 실행합니다. |
+| Python 3.12 | 설치 후 `python3.12 --version`으로 확인합니다. [Python 공식 다운로드](https://www.python.org/downloads/) |
+| Docker Desktop | 설치 후 앱을 열어 둡니다. 프로젝트의 MySQL 8.4를 실행합니다. [Docker Desktop 설치 안내](https://docs.docker.com/desktop/) |
+| Aside 브라우저 | 아래 설치 절차를 따릅니다. |
 | AI 연결 (둘 중 하나) | **API 키**(Anthropic, OpenAI) 또는 이 컴퓨터에 로그인된 **Claude Code·Codex 구독**. 둘 다 없어도 연습용(`FM_AI_MODE=mock`)으로는 끝까지 돌려 볼 수 있습니다. |
 | 당근 비즈니스 계정 | 실제로 올릴 때만. 연습용 화면에는 필요 없습니다. |
 
-### 세팅 순서
+### Aside 브라우저 설치
+
+- **macOS**에서 공식 다운로드 페이지를 열고 Mac에 맞는 Apple Silicon 또는 Intel 설치 파일을 받습니다. `Aside.dmg`를 열고 Aside 아이콘을 **응용 프로그램(Applications)** 폴더로 끌어 놓습니다. 응용 프로그램에서 Aside를 한 번 실행해 초기 설정을 마칩니다. [Aside 공식 다운로드](https://aside.com/download)
+- **Windows**에서는 같은 다운로드 페이지에서 시스템 종류에 맞는 Windows 설치 파일(x64 또는 ARM64)을 받고 실행합니다. 설치가 끝나면 시작 메뉴에서 Aside를 열고 초기 설정을 마칩니다. [Aside 공식 다운로드](https://aside.com/download)
+- macOS 프로젝트가 찾는 기본 실행 파일은 `/Applications/Aside.app/Contents/MacOS/Aside`입니다. 다른 폴더에 설치했다면 프로젝트의 `.env`에서 `FM_ASIDE_PATH`에 Aside **실행 파일**의 전체 경로를 적습니다.
+
+Windows의 Aside 설치와 이 프로젝트의 실행 조건은 별개입니다. 프로젝트 워커는 Unix 파일 잠금(`fcntl`)을 사용하고 Aside 프로필 종료에 `pgrep`을 사용하므로 Windows PowerShell에서 바로 실행할 수 없습니다. 아래 프로젝트 실행 명령은 macOS에서 사용합니다.
+
+### macOS 프로젝트 세팅 순서
 
 프로젝트 폴더(`futuremarketer-autopost`)에서:
 
@@ -71,7 +79,7 @@ python -m streamlit run streamlit_app.py   # 6. 실행
 | "데이터베이스에 연결하지 못했습니다" | Docker Desktop 이 켜져 있는지 확인하고 `docker compose up -d`. 처음 뜰 때는 10~20초 걸립니다. |
 | "표 구조가 지금 코드와 다릅니다" | 아주 오래된 DB 입니다. `python -m futuremarketer.db_init --reset` (등록 기록이 지워집니다) |
 | 3317 포트를 이미 쓰고 있음 | `docker-compose.yml` 의 `127.0.0.1:3317` 과 `.env` 의 두 DB 주소에서 포트를 같이 바꿉니다. |
-| "Aside 브라우저를 찾지 못했습니다" | Aside 를 설치하거나 `.env` 의 `FM_ASIDE_PATH` 에 실행 파일 경로(`…/Aside.app/Contents/MacOS/Aside`)를 적습니다. |
+| "Aside 브라우저를 찾지 못했습니다" | [Aside 브라우저 설치](#aside-브라우저-설치)를 따라 응용 프로그램에 설치합니다. 다른 폴더에 설치했다면 `.env`의 `FM_ASIDE_PATH`에 실행 파일 경로를 적습니다. |
 | 구독 로그인 "연결 확인" 실패 | 터미널에서 `claude`, `codex` 를 한 번 실행해 로그인을 마치고, 최신 버전으로 올립니다. |
 | 자동화 엔진이 꺼져 있음 | 왼쪽 아래 "자동화 엔진 켜기". 기록은 앱 데이터 폴더의 `data/logs/worker.log` |
 
@@ -91,6 +99,7 @@ Claude Code, Codex, Cursor 같은 AI 코딩 도구에게 이 폴더를 열어 �
 ### AI 에이전트용 세팅 지시서
 
 > 이 절은 AI 코딩 도구가 그대로 따라 하도록 쓴 것입니다. 작업 폴더는 이 README 가 있는 폴더입니다.
+> 프로젝트 실행 절차는 macOS 기준입니다. Aside가 없으면 위 [Aside 브라우저 설치](#aside-브라우저-설치)를 안내합니다.
 
 **지켜야 할 것**
 
@@ -138,6 +147,7 @@ Claude Code, Codex, Cursor 같은 AI 코딩 도구에게 이 폴더를 열어 �
 2. **계정 설정 → AI 연결**에서 Claude(글), GPT(이미지)마다 ‘API 키’ 또는 ‘구독 로그인’을 고르고 저장합니다. API 키 방식에서 ‘연결 확인’을 누르면 지정한 모델을 조회합니다. 사용할 모델은 `FM_CLAUDE_API_MODEL`, `FM_OPENAI_IMAGE_MODEL`로 지정합니다.
 3. **상품 등록 → 불러오기**: 연결된 엑셀(`samples/상품목록.xlsx`)을 읽습니다. 다른 파일을 올려 불러올 수도 있습니다. 상품마다 지금 등록할 수 있는지 검사해 "등록 가능 / 등록 불가(이유)"로 보여 줍니다.
 4. **상품을 체크하고 "선택한 n개 등록"**: 오른쪽 "등록 진행"에 단계와 브라우저 화면, 기록이 실시간으로 나옵니다.
+   - 상품 목록이나 초안의 사진을 누르면 원본 비율로 크게 볼 수 있습니다.
    - 글과 사진만 준비하려면 **게시하지 않고 초안만 준비**를 체크하고 **선택한 n개 초안 준비**를 누릅니다. 상품 줄의 **가격 없는 소식 초안**에서 결과를 볼 수 있습니다.
    - 소식 작성 화면에 제재 안내가 뜨거나 선택한 업체의 작성 화면을 확인할 수 없으면 **게시 보류**로 멈춥니다. 처음부터 제한된 계정은 가격표 저장 전까지만 진행합니다.
 5. **연결 해제**: 계정 설정에서 누르면 이 컴퓨터에 저장된 당근 로그인 정보(전용 브라우저 프로필)와 계정 화면이 찍힌 캡처를 지웁니다.
