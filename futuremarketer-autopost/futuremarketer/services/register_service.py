@@ -69,7 +69,7 @@ def finish_product(session, job: dict, status: str, now) -> None:
             st=status, now=now, id=job["product_id"])
 
 
-def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool, register_price: bool) -> None:
+def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool, register_price: bool, register_news: bool) -> None:
     """실패한 작업을 다시 줄에 세운다. 끝난 단계의 결과는 그대로 두고, 지침은 지금 것으로 바꾼다.
 
     가격표 등록을 켠 경우, 건너뛴 가격 단계나 사진을 올리지 않던 예전 방식으로 끝난 가격 단계를 다시 한다.
@@ -82,7 +82,9 @@ def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool, registe
     price = steps["PRICE"]
     if register_price and price["status"] == "DONE" and (price.get("skipped") or ("photo" not in price and "detail" not in price)):
         steps["PRICE"] = {"status": "PENDING"}
-    request = {**job["request_json"], "draft_only": draft_only, "register_price": register_price,
+    if (register_news or draft_only) and steps["NEWS"].get("skipped"):
+        steps["NEWS"] = {"status": "PENDING"}
+    request = {**job["request_json"], "draft_only": draft_only, "register_price": register_price, "register_news": register_news,
                "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
                "prompt_versions": {k: v["version_no"] for k, v in prompts.items()}}
     execute(session,
@@ -94,11 +96,13 @@ def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool, registe
 
 
 def enqueue_register(engine, secrets: SecretStore, settings: Settings, product_ids: list[str], *,
-                     run_key: str, draft_only: bool = False, register_price: bool = True) -> dict:
+                     run_key: str, draft_only: bool = False, register_price: bool = True, register_news: bool = True) -> dict:
     """고른 상품들을 등록 줄에 세운다. 돌려주는 값: {run_id, queued:[코드], skipped:[{code, reason}]}"""
     ids = list(dict.fromkeys(product_ids))
     if not ids:
         raise DomainError("VALIDATION_ERROR", "등록할 상품을 먼저 골라 주세요.")
+    if not (draft_only or register_price or register_news):
+        raise DomainError("VALIDATION_ERROR", "가격표 등록 또는 소식 등록을 켜 주세요.")
     run_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"fm-run:{run_key}"))
     queued, skipped = [], []
     now = utcnow()
@@ -138,14 +142,14 @@ def enqueue_register(engine, secrets: SecretStore, settings: Settings, product_i
             if last and last["status"] == "FAILED" and job_place(last) == place \
                     and last["request_json"].get("kind") != "REMOVE" \
                     and last["request_json"].get("fingerprint") == product["source_fingerprint"]:
-                _resume(s, last, prompts, now, draft_only=draft_only, register_price=register_price)
+                _resume(s, last, prompts, now, draft_only=draft_only, register_price=register_price, register_news=register_news)
                 queued.append(code)
                 continue
             job_id = new_id()
             request = {"product_code": code, "name": product["name"], "price": product["price_krw"],
                        "info": product["info"], "post_title": product["post_title"], "script": product["script"],
                        "fingerprint": product["source_fingerprint"], "target": place[0], "biz_id": place[1],
-                       "draft_only": draft_only, "register_price": register_price,
+                       "draft_only": draft_only, "register_price": register_price, "register_news": register_news,
                        "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
                        "prompt_versions": {k: v["version_no"] for k, v in prompts.items()}}
             execute(s,

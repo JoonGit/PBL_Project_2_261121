@@ -8,7 +8,7 @@ import stat
 import pytest
 from PIL import Image
 
-from futuremarketer.adapters.daangn import SiteError
+from futuremarketer.adapters.daangn import SiteError, price_description
 from futuremarketer.adapters.text_ai import AiError
 from futuremarketer.db import execute, fetch_all, fetch_one, session_scope
 from futuremarketer.defaults import DEFAULT_PROMPTS
@@ -214,6 +214,36 @@ def test_price_can_be_enabled_on_retry_after_it_was_skipped(engine, store, setti
     resumed = job_of(engine, "P1")
     assert resumed["id"] == job["id"] and resumed["status"] == "SUCCEEDED"
     assert len(hub.prices) == len(hub.posts) == 1
+
+
+def test_price_only_uses_script_and_ignores_news_editor_restriction(engine, store, settings, secrets, worker, hub):
+    script = "원목 탁상시계는 뒤쪽 다이얼을 돌려 시간을 맞춥니다.\n받침을 평평한 곳에 두고 눈높이에 맞춰 놓으면 시간을 읽기 편합니다."
+    rows = prepare(engine, store, settings, secrets, [["P1", "탁상시계", 12000, None, None, script, None]])
+    product_id = rows["P1"]["id"]
+    hub.business_status = "RESTRICTED"
+    register_service.enqueue_register(engine, secrets, settings, [product_id], run_key="price-only", register_news=False)
+    run_until_idle(worker)
+    job = job_of(engine, "P1")
+    assert job["status"] == "SUCCEEDED" and job["steps_json"]["NEWS"]["skipped"]
+    assert hub.prices == [("1001", "탁상시계", 12000)] and not hub.posts
+    assert hub.price_notes == [script]
+    assert price_description(script) == script.splitlines()[0]
+    assert query_rows(engine, secrets, settings)["P1"]["removal"] == {"price": "탁상시계", "news": None}
+    with session_scope(engine) as s:
+        assert query_service.news_today(s, ("PRACTICE", "1001")) == 0
+
+
+def test_no_publication_mode_requires_at_least_one_target_unless_drafting(engine, store, settings, secrets, worker, hub):
+    rows = prepare(engine, store, settings, secrets, [["P1", "탁상시계", 12000, None, None, "원목 시계 사용법입니다.", None]])
+    product_id = rows["P1"]["id"]
+    with pytest.raises(DomainError, match="가격표 등록 또는 소식 등록"):
+        register_service.enqueue_register(engine, secrets, settings, [product_id], run_key="none",
+                                          register_price=False, register_news=False)
+    register_service.enqueue_register(engine, secrets, settings, [product_id], run_key="draft",
+                                      draft_only=True, register_price=False, register_news=False)
+    run_until_idle(worker)
+    assert not hub.prices and not hub.posts
+    assert job_of(engine, "P1")["error_code"] == "PREVIEW_ONLY"
 
 
 def test_new_default_guidelines_preserve_history_and_custom_prompts(engine):

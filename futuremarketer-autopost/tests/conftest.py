@@ -87,6 +87,7 @@ class SiteHub:
         self.business_status = "VERIFIED"
         self.prices: list[tuple] = []
         self.price_photos: list[Path | None] = []
+        self.price_notes: list[str] = []
         self.posts: list[dict] = []
         self.opened = 0
         self.closed = 0
@@ -126,13 +127,15 @@ class FakeSite:
     def business_verification(self, biz_id):
         return self.hub.business_status
 
-    def register_price(self, biz_id, name, price, image_path=None, *, before_submit):
+    def register_price(self, biz_id, name, price, image_path=None, *, before_submit, description=None):
         self.on_log("가격표 화면을 엽니다.", "INFO", None)
         self._maybe_fail("price_before")
         before_submit()
         self._maybe_fail("price_after")
         self.hub.prices.append((biz_id, name, price))
         self.hub.price_photos.append(Path(image_path) if image_path else None)
+        if description is not None:
+            self.hub.price_notes.append(description)
         self.on_log("가격을 등록했습니다.", "DONE", SCREEN)
         return {"action": "ADDED", "item_name": name, "photo": image_path is not None}
 

@@ -79,6 +79,9 @@ def test_pages_render_empty_and_filled(app_env, engine, store, settings, secrets
     assert job_count(engine) == 0
     price_toggle = at.toggle(key="register_price")
     assert price_toggle.value
+    assert not at.toggle(key="register_news").value
+    at.toggle(key="register_news").set_value(True).run()
+    price_toggle = at.toggle(key="register_price")
     price_toggle.set_value(False).run()
     at.checkbox(key=boxes[0].key).check().run()
     register = next(b for b in at.button if b.label == "선택한 1개 소식 등록")
@@ -86,7 +89,8 @@ def test_pages_render_empty_and_filled(app_env, engine, store, settings, secrets
     assert not at.exception, at.exception
     assert job_count(engine) == 1
     with session_scope(engine) as session:
-        assert fetch_one(session, "SELECT request_json FROM task_job")["request_json"]["register_price"] is False
+        request = fetch_one(session, "SELECT request_json FROM task_job")["request_json"]
+        assert request["register_price"] is False and request["register_news"] is True
     at.run()
     assert job_count(engine) == 1
 

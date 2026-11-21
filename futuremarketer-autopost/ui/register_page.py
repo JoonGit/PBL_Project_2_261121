@@ -41,11 +41,12 @@ def _register() -> None:
     ids = [i for i in st.session_state.get("_selectable", []) if st.session_state.get(f"sel_{i}")]
     draft_only = st.session_state.get("draft_only", False)
     register_price = st.session_state.get("register_price", True)
+    register_news = st.session_state.get("register_news", False)
     try:
         common.start_worker()       # 워커가 꺼져 있었다면 다시 켠다
         out = register_service.enqueue_register(common.engine(), common.secrets(), common.settings(), ids,
                                                 run_key=common.request_key(RUN_KEY), draft_only=draft_only,
-                                                register_price=register_price)
+                                                register_price=register_price, register_news=register_news)
     except Exception as exc:
         common.flash(common.error_text(exc), "error")
         return
@@ -256,13 +257,22 @@ def _list(listing: dict) -> None:
         common.section(f"상품 {len(rows)}개", summary)
     with action:
         draft_only = st.checkbox("게시하지 않고 초안만 준비", key="draft_only")
-        register_price = st.toggle("가격표 등록", value=True, key="register_price", disabled=draft_only,
-                                   help="끄면 가격표는 건너뛰고 소식만 등록합니다.")
-        action_name = "등록" if register_price else "소식 등록"
+        pricing, news = st.columns(2)
+        register_price = pricing.toggle("가격표 등록", value=True, key="register_price", disabled=draft_only,
+                                        help="가격표의 추가 설명에 원고의 앞부분을 최대 50자로 넣습니다.")
+        register_news = news.toggle("소식 등록", value=False, key="register_news", disabled=draft_only)
+        can_submit = draft_only or register_price or register_news
         if draft_only:
             action_name = "초안 준비"
-        st.button(f"선택한 {len(chosen)}개 {action_name}" if chosen else "등록할 상품을 골라 주세요", type="primary",
-                  disabled=not chosen, on_click=_register, width="stretch", icon=":material/send:")
+        elif register_price and register_news:
+            action_name = "등록"
+        else:
+            action_name = "가격표 등록" if register_price else "소식 등록"
+        button_label = f"선택한 {len(chosen)}개 {action_name}" if chosen else "등록할 상품을 골라 주세요"
+        if not can_submit:
+            button_label = "가격표 또는 소식 등록을 켜 주세요"
+        st.button(button_label, type="primary", disabled=not chosen or not can_submit,
+                  on_click=_register, width="stretch", icon=":material/send:")
     st.checkbox("등록 가능한 상품 모두 선택", key="sel_all", on_change=_select_all, disabled=not selectable)
     for row in rows:
         _row(row)

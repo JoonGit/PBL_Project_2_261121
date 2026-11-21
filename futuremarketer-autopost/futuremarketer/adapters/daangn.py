@@ -32,6 +32,7 @@ NEWS_TITLE_MAX = 30        # 소식 제목 칸은 30자까지
 NEWS_IMAGE_MAX = 10        # 소식 사진은 10장까지
 UPLOAD_IMAGE_LIMIT = 7_000_000
 RESTRICTION_TEXT = re.compile(r"비즈프로필이 제재되어 이용할 수 없|운영정책을 위반해 활동이 제한")
+PRICE_ACCESS_TEXT = re.compile(r"권한이\s*(?:없|필요)|접근할 수 없")
 PHOTO_COUNTER = re.compile(r"^\s*\d+\s*/\s*10\s*$")     # 소식 사진 버튼에 보이는 「0/10」
 SORTABLE = '[aria-roledescription="sortable"]'           # 소식에 붙인 사진 하나하나(끌어서 순서를 바꾸는 칸)
 
@@ -109,6 +110,18 @@ def _upload_files(paths: list[Path]) -> Iterator[list[str]]:
                 raise SiteError("UPLOAD_FAILED", f"업로드할 사진을 준비하지 못했습니다: {path.name}") from exc
             files.append(str(output))
         yield files
+
+
+def price_description(script: str) -> str:
+    """가능하면 문장을 끝까지 담고, 긴 첫 문장은 입력 칸 길이에 맞춘다."""
+    text = " ".join(script.split())
+    note = ""
+    for sentence in re.split(r"(?<=[.!?。！？])\s+", text):
+        candidate = f"{note} {sentence}".strip()
+        if len(candidate) > PRICE_NOTE_MAX:
+            break
+        note = candidate
+    return note or fit_text(text, PRICE_NOTE_MAX)
 
 
 LogFn = Callable[[str, str, bytes | None], None]
@@ -514,7 +527,7 @@ class DaangnSite:
         field.press_sequentially(value, delay=25)
 
     def register_price(self, biz_id: str, name: str, price: int, image_path: Path | None = None, *,
-                       before_submit: Callable[[], None]) -> dict:
+                       before_submit: Callable[[], None], description: str | None = None) -> dict:
         """가격표에 상품 하나를 올린다(사진·항목·정가·추가 설명).
 
         같은 이름의 항목이 이미 있으면 새로 만들지 않고 그 항목을 고친다(두 번 올라가지 않게).
@@ -522,16 +535,27 @@ class DaangnSite:
         """
         full = " ".join(name.split())
         item_name = fit_text(full, PRICE_NAME_MAX)
-        note = fit_text(full, PRICE_NOTE_MAX) if item_name != full else ""
+        if description is not None:
+            note = price_description(description)
+        else:
+            note = fit_text(full, PRICE_NOTE_MAX) if item_name != full else ""
         self._log("가격표 화면을 엽니다.")
-        self._goto(f"{self.urls.base}/biz_accounts/{biz_id}/manager/pricing")
+        pricing_url = f"{self.urls.base}/biz_accounts/{biz_id}/manager/pricing"
+        self._goto(pricing_url)
         self._ensure_authed()
+        location, expected = urlsplit(self.page.url), urlsplit(pricing_url)
+        restricted = self.page.get_by_text(RESTRICTION_TEXT).or_(self.page.get_by_text(PRICE_ACCESS_TEXT))
+        if ((location.netloc, location.path.rstrip("/")) != (expected.netloc, expected.path)
+                or self._visible(restricted)):
+            raise SiteError("PREVIEW_ONLY", "게시 보류 · 선택한 비즈프로필의 가격표 작성 화면을 이용할 수 없습니다.")
         add = self._find("가격 추가 버튼",
                          lambda p: p.get_by_role("button", name=re.compile("가격 추가")),
                          lambda p: p.get_by_text("가격 추가", exact=True))
         with contextlib.suppress(Exception):           # 가격 목록을 다 받아 온 뒤에 같은 이름을 찾는다
             self.page.wait_for_load_state("networkidle", timeout=4000)
-        if note:
+        if description is not None and note:
+            self._log(f"준비한 원고를 가격 추가 설명에 {len(note)}자로 입력합니다.")
+        elif note:
             self._log(f"항목 이름 칸은 {PRICE_NAME_MAX}자까지라 「{item_name}」(으)로 줄이고, 전체 이름은 추가 설명에 적습니다.")
         edit = self._price_edit_button(item_name)
         if edit is not None:
@@ -568,7 +592,7 @@ class DaangnSite:
         if note:
             box = self._find("추가 설명 입력란",
                              lambda p: dialog.get_by_placeholder(re.compile("설명이 필요하다면")),
-                             lambda p: dialog.locator("textarea"), required=False, timeout=2)
+                             lambda p: dialog.locator("textarea"), required=description is not None, timeout=2)
             if box is not None and (box.input_value() or "").strip() != note:
                 self._retype(box, note)
                 changed = True

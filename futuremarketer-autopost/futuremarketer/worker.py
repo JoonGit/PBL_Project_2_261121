@@ -625,8 +625,9 @@ class Worker:
 
         site = self._ensure_site(job, step)
         try:
-            if job["request_json"].get("kind") != "REMOVE":
-                status = site.business_verification(job["request_json"]["biz_id"])
+            request = job["request_json"]
+            if request.get("kind") != "REMOVE" and (request.get("register_news", True) or request.get("draft_only")):
+                status = site.business_verification(request["biz_id"])
                 if status not in ("VERIFIED", "UNVERIFIED", "UNKNOWN"):
                     reason = ("당근이 이 비즈프로필의 소식 작성을 제한했습니다." if status == "RESTRICTED"
                               else "선택한 업체의 소식 작성 화면을 확인할 수 없습니다.")
@@ -666,13 +667,17 @@ class Worker:
             return {"skipped": True}
         keys = job["steps_json"]["IMAGE"].get("image_keys") or []
         image = self.store.path_for(keys[0]) if keys else None
+        description = job["steps_json"]["SCRIPT"]["body"]
         result = self._site_call(job, "PRICE", submitted, lambda site, before: site.register_price(
-            req["biz_id"], req["name"], int(req["price"]), image, before_submit=before))
+            req["biz_id"], req["name"], int(req["price"]), image, before_submit=before, description=description))
         return {"action": result.get("action"), "item_name": result.get("item_name"), "photo": bool(result.get("photo"))}
 
     def _step_news(self, job: dict, submitted: dict) -> dict:
         """소식: 상품 사진을 모두 올린 뒤 제목·본문을 쓴다."""
         req = job["request_json"]
+        if not req.get("register_news", True) and not req.get("draft_only"):
+            self._event(job, "NEWS", "INFO", "소식 등록을 건너뜁니다.")
+            return {"skipped": True}
         steps = job["steps_json"]
         script = steps["SCRIPT"]
         if script.get("mode") == "AI":
