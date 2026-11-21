@@ -12,13 +12,14 @@ from __future__ import annotations
 import base64
 import io
 import json
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
+
+from ..config import ai_cli_path
 
 MAX_TEXT_IMAGES = 3          # 글을 쓸 때 참고로 보내는 사진 수
 MAX_IMAGE_SIDE = 1568        # 보내기 전에 줄이는 긴 변 길이
@@ -151,19 +152,19 @@ class ClaudeCliTextGenerator:
     """Claude Code 명령줄을 한 번 실행해 글을 받는다. 로그인은 Claude Code 가 가진 것을 쓴다."""
 
     def __init__(self, model: str = "opus", executable: str | None = None, timeout: int = 240):
-        self.executable = executable or shutil.which("claude")
+        self.executable = executable or ai_cli_path("claude")
         self.model = model
         self.timeout = timeout
 
     @staticmethod
     def available() -> bool:
-        return shutil.which("claude") is not None
+        return ai_cli_path("claude") is not None
 
     def _run(self, args: list[str], cwd: str) -> dict:
         if not self.executable:
             raise AiError("AI_NOT_INSTALLED", "이 컴퓨터에서 Claude Code(claude 명령)를 찾지 못했습니다.")
         try:
-            proc = subprocess.run([self.executable, *args], cwd=cwd, capture_output=True, text=True,
+            proc = subprocess.run([self.executable, *args], cwd=cwd, capture_output=True, encoding="utf-8", errors="replace",
                                   timeout=self.timeout, stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired as exc:
             raise AiError("AI_TEMPORARY", "Claude Code 응답이 너무 오래 걸립니다.", transient=True) from exc

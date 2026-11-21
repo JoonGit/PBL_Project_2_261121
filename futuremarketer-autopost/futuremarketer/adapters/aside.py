@@ -10,11 +10,12 @@ import contextlib
 import json
 import os
 import shutil
-import signal
 import subprocess
 import time
 import urllib.request
 from pathlib import Path
+
+import psutil
 
 INTERNAL_PREFIXES = ("chrome-extension://", "chrome://", "devtools://")
 
@@ -192,7 +193,9 @@ def open_detached(exe: Path, profile_dir: Path, port: int, window: tuple[int, in
         args = [str(exe), f"--user-data-dir={profile_dir}", f"--remote-debugging-port={port}",
                 "--no-first-run", "--no-default-browser-check", f"--window-size={w},{h}"]
         args += ["--headless=new", "about:blank"] if headless else [f"--window-position={x},{y}"]
-        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        detached = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+                    else {"start_new_session": True})
+        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detached)
         deadline = time.monotonic() + 30
         while not browser.cdp_alive():
             if time.monotonic() > deadline or proc.poll() is not None:
@@ -216,14 +219,22 @@ def open_detached(exe: Path, profile_dir: Path, port: int, window: tuple[int, in
             pw.stop()          # 연결만 끊는다. 브라우저와 창은 그대로 둔다
 
 
+def _profile_processes(profile_dir: Path) -> list[psutil.Process]:
+    """명령행에서 이 프로필을 정확히 지정한 프로세스만 찾는다."""
+    profile = os.path.normcase(os.path.normpath(profile_dir))
+    prefix = "--user-data-dir="
+    matches = []
+    for process in psutil.process_iter(["cmdline"], ad_value=None):
+        if process.pid != os.getpid():
+            args = process.info["cmdline"] or []
+            if any(arg.startswith(prefix) and os.path.normcase(os.path.normpath(arg[len(prefix):])) == profile
+                   for arg in args[1:]):
+                matches.append(process)
+    return matches
+
+
 def profile_pids(profile_dir: Path) -> list[int]:
-    """이 프로필 폴더로 떠 있는 브라우저 프로세스."""
-    marker = f"--user-data-dir={Path(profile_dir)}"
-    try:      # 패턴이 - 로 시작하므로 -- 로 옵션의 끝을 알려 준다
-        out = subprocess.run(["pgrep", "-f", "--", marker], capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    return [int(p) for p in out.split() if p.isdigit() and int(p) != os.getpid()]
+    return [process.pid for process in _profile_processes(profile_dir)]
 
 
 def _wait_gone(profile_dir: Path, seconds: float) -> bool:
@@ -238,16 +249,16 @@ def _wait_gone(profile_dir: Path, seconds: float) -> bool:
 def stop_profile_processes(profile_dir: Path) -> bool:
     """이 프로필로 떠 있는 Aside 를 끝낸다. 모두 끝났으면 True.
 
-    먼저 정중하게(SIGTERM) 끝내 달라고 하고, 몇 초 뒤에도 남아 있으면 강제로(SIGKILL) 끝낸다.
+    먼저 종료를 요청하고, 몇 초 뒤에도 남아 있으면 강제로 끝낸다.
     그사이 새로 생긴 도우미 프로세스도 놓치지 않도록, 보낼 때마다 대상을 다시 찾는다.
     """
-    for sig, wait in ((signal.SIGTERM, 6), (signal.SIGKILL, 4)):
-        pids = profile_pids(profile_dir)
-        if not pids:
+    for stop, wait in ((psutil.Process.terminate, 6), (psutil.Process.kill, 4)):
+        processes = _profile_processes(profile_dir)
+        if not processes:
             return True
-        for pid in pids:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.kill(pid, sig)
+        for process in processes:
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                stop(process)
         if _wait_gone(profile_dir, wait):
             return True
     return False

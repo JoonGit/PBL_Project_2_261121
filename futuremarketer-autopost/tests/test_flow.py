@@ -437,8 +437,8 @@ def test_control_is_blocked_while_registering(engine, store, settings, secrets):
 # --- AI 연결·지침 --------------------------------------------------------------
 def test_api_key_lives_outside_db_and_project(engine, settings, secrets):
     settings_service.save_ai(engine, secrets, "CLAUDE", mode="API_KEY", api_key="sk-ant-test-0123456789abcdefghij")
-    mode = stat.S_IMODE(os.stat(settings.secrets_path).st_mode)
-    assert mode == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(os.stat(settings.secrets_path).st_mode) == 0o600
     with session_scope(engine) as s:
         dump = str(fetch_all(s, "SELECT * FROM ai_connection"))
     assert "sk-ant-test" not in dump

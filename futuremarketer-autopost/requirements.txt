@@ -7,6 +7,8 @@ openpyxl>=3.1,<4
 Pillow>=10.4
 python-dotenv>=1.0
 playwright>=1.48
+psutil>=6,<8
+tzdata; sys_platform == "win32"
 anthropic>=0.70
 openai>=1.60
 pytest>=8

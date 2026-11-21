@@ -32,9 +32,9 @@
 
 | 항목 | 설명 |
 |---|---|
-| 운영체제 | 프로젝트의 설치와 자동 등록은 macOS에서 확인했습니다. Windows에서 Aside 브라우저는 설치할 수 있습니다. 프로젝트 워커는 macOS에서 실행합니다. |
-| Python 3.12 | 설치 후 `python3.12 --version`으로 확인합니다. [Python 공식 다운로드](https://www.python.org/downloads/) |
-| Docker Desktop | 설치 후 앱을 열어 둡니다. 프로젝트의 MySQL 8.4를 실행합니다. [Docker Desktop 설치 안내](https://docs.docker.com/desktop/) |
+| 운영체제 | Windows와 macOS 설치 절차를 아래에 안내합니다. 실제 당근 등록·삭제 검증 기록은 macOS에서 얻었습니다. |
+| Python 3.12 | Windows에서는 `py -3.12 --version`, macOS에서는 `python3.12 --version`으로 확인합니다. [Python 공식 다운로드](https://www.python.org/downloads/) |
+| Docker Desktop | 설치 후 앱을 열어 둡니다. Windows에서는 MySQL용 Linux 컨테이너를 실행할 수 있도록 WSL 2 백엔드를 사용합니다. [Windows 설치](https://docs.docker.com/desktop/setup/install/windows-install/) · [macOS 설치](https://docs.docker.com/desktop/setup/install/mac-install/) |
 | Aside 브라우저 | 아래 설치 절차를 따릅니다. |
 | AI 연결 (둘 중 하나) | **API 키**(Anthropic, OpenAI) 또는 이 컴퓨터에 로그인된 **Claude Code·Codex 구독**. 둘 다 없어도 연습용(`FM_AI_MODE=mock`)으로는 끝까지 돌려 볼 수 있습니다. |
 | 당근 비즈니스 계정 | 실제로 올릴 때만. 연습용 화면에는 필요 없습니다. |
@@ -43,9 +43,30 @@
 
 - **macOS**에서 공식 다운로드 페이지를 열고 Mac에 맞는 Apple Silicon 또는 Intel 설치 파일을 받습니다. `Aside.dmg`를 열고 Aside 아이콘을 **응용 프로그램(Applications)** 폴더로 끌어 놓습니다. 응용 프로그램에서 Aside를 한 번 실행해 초기 설정을 마칩니다. [Aside 공식 다운로드](https://aside.com/download)
 - **Windows**에서는 같은 다운로드 페이지에서 시스템 종류에 맞는 Windows 설치 파일(x64 또는 ARM64)을 받고 실행합니다. 설치가 끝나면 시작 메뉴에서 Aside를 열고 초기 설정을 마칩니다. [Aside 공식 다운로드](https://aside.com/download)
-- macOS 프로젝트가 찾는 기본 실행 파일은 `/Applications/Aside.app/Contents/MacOS/Aside`입니다. 다른 폴더에 설치했다면 프로젝트의 `.env`에서 `FM_ASIDE_PATH`에 Aside **실행 파일**의 전체 경로를 적습니다.
+- 프로젝트는 Windows의 일반 설치 폴더와 macOS의 `/Applications/Aside.app/Contents/MacOS/Aside`에서 실행 파일을 찾습니다. 점검에서 Aside를 찾지 못하면 `.env`의 `FM_ASIDE_PATH`에 실제 실행 파일 경로를 적습니다. Windows에서는 Aside 실행 중 PowerShell의 `Get-Process Aside | Select-Object -ExpandProperty Path -Unique`로 경로를 확인할 수 있습니다. 경로에 공백이 있으면 `FM_ASIDE_PATH="C:/Program Files/Aside/Application/aside.exe"`처럼 큰따옴표와 슬래시를 사용합니다.
 
-Windows의 Aside 설치와 이 프로젝트의 실행 조건은 별개입니다. 프로젝트 워커는 Unix 파일 잠금(`fcntl`)을 사용하고 Aside 프로필 종료에 `pgrep`을 사용하므로 Windows PowerShell에서 바로 실행할 수 없습니다. 아래 프로젝트 실행 명령은 macOS에서 사용합니다.
+### Windows 프로젝트 세팅 순서
+
+Aside와 Docker Desktop을 설치한 뒤, **Windows PowerShell**에서 프로젝트 폴더(`futuremarketer-autopost`)를 열고 실행합니다. 이미 다른 컴퓨터에서 받은 프로젝트라면 이 컴퓨터에서 가상환경을 새로 만듭니다.
+
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+py -3.12 -m venv .venv
+& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+docker compose up -d --wait
+$env:PYTHONUTF8 = "1"
+$env:PYTHONDONTWRITEBYTECODE = "1"
+& .\.venv\Scripts\python.exe scripts/check_setup.py
+```
+
+점검에서 필수 항목이 모두 **[통과]** 하면 다음을 실행하고 브라우저에서 http://127.0.0.1:8501 을 엽니다.
+
+```powershell
+& .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
+```
+
+Windows에서 프로젝트 파일을 업데이트한 뒤에는 실행 중인 PowerShell에서 `Ctrl+C`를 눌러 앱을 끄고 위 실행 명령을 다시 입력합니다.
+Windows에서 구독 로그인을 사용할 때는 `claude.exe` 또는 `codex.exe`가 PowerShell의 PATH에서 검색돼야 합니다. API 키 방식과 대본·사진이 있는 상품은 이 실행 파일 없이 사용할 수 있습니다.
 
 ### macOS 프로젝트 세팅 순서
 
@@ -79,7 +100,7 @@ python -m streamlit run streamlit_app.py   # 6. 실행
 | "데이터베이스에 연결하지 못했습니다" | Docker Desktop 이 켜져 있는지 확인하고 `docker compose up -d`. 처음 뜰 때는 10~20초 걸립니다. |
 | "표 구조가 지금 코드와 다릅니다" | 아주 오래된 DB 입니다. `python -m futuremarketer.db_init --reset` (등록 기록이 지워집니다) |
 | 3317 포트를 이미 쓰고 있음 | `docker-compose.yml` 의 `127.0.0.1:3317` 과 `.env` 의 두 DB 주소에서 포트를 같이 바꿉니다. |
-| "Aside 브라우저를 찾지 못했습니다" | [Aside 브라우저 설치](#aside-브라우저-설치)를 따라 응용 프로그램에 설치합니다. 다른 폴더에 설치했다면 `.env`의 `FM_ASIDE_PATH`에 실행 파일 경로를 적습니다. |
+| "Aside 브라우저를 찾지 못했습니다" | [Aside 브라우저 설치](#aside-브라우저-설치)를 따라 설치합니다. 자동으로 찾지 못하면 `.env`의 `FM_ASIDE_PATH`에 실제 실행 파일 경로를 적습니다. |
 | 구독 로그인 "연결 확인" 실패 | 터미널에서 `claude`, `codex` 를 한 번 실행해 로그인을 마치고, 최신 버전으로 올립니다. |
 | 자동화 엔진이 꺼져 있음 | 왼쪽 아래 "자동화 엔진 켜기". 기록은 앱 데이터 폴더의 `data/logs/worker.log` |
 
@@ -99,7 +120,7 @@ Claude Code, Codex, Cursor 같은 AI 코딩 도구에게 이 폴더를 열어 �
 ### AI 에이전트용 세팅 지시서
 
 > 이 절은 AI 코딩 도구가 그대로 따라 하도록 쓴 것입니다. 작업 폴더는 이 README 가 있는 폴더입니다.
-> 프로젝트 실행 절차는 macOS 기준입니다. Aside가 없으면 위 [Aside 브라우저 설치](#aside-브라우저-설치)를 안내합니다.
+> 운영체제에 맞춰 명령을 골라 씁니다. Windows에서는 위 [Windows 프로젝트 세팅 순서](#windows-프로젝트-세팅-순서)의 PowerShell 명령과 `.\.venv\Scripts\python.exe`를 사용합니다. 아래 표의 셸 표기는 macOS 기준입니다.
 
 **지켜야 할 것**
 
@@ -115,7 +136,7 @@ Claude Code, Codex, Cursor 같은 AI 코딩 도구에게 이 폴더를 열어 �
 
 | # | 할 일 | 확인 |
 |---|---|---|
-| 1 | 운영체제·도구 확인: `uname -s`, `python3.12 --version`, `docker --version`, `ls /Applications/Aside.app` | macOS(`Darwin`)인지. 없는 도구는 사용자에게 설치를 부탁하고 멈춘다(Python 은 `uv python install 3.12` 또는 `brew install python@3.12` 를 제안할 수 있다). |
+| 1 | Windows 또는 macOS를 확인하고 해당 설치 절차에서 Python 3.12, Docker Desktop, Aside를 점검한다. | 빠진 도구가 있으면 해당 운영체제의 공식 설치 안내를 공유한다. |
 | 2 | Docker 가 켜져 있는지: `docker info` | 실패하면 "Docker Desktop 을 켜 주세요"라고 하고 기다린다. |
 | 3 | `.env` 가 없으면 `cp .env.example .env` | 이미 있으면 덮어쓰지 않는다. |
 | 4 | `docker compose up -d` 후 `docker compose ps` | `fm-autopost-mysql` 이 `healthy` 가 될 때까지 기다린다(최대 1분). 3317 포트 충돌이면 사용자에게 알린다. |
@@ -250,7 +271,7 @@ tests/                      시험(실제 MySQL 사용)
 | 내용 | 위치 |
 |---|---|
 | 상품, 작업, 진행 기록, 연결 방식 | MySQL (Docker 볼륨) |
-| **당근 로그인 정보**(전용 브라우저 프로필), **API 키** | `~/Library/Application Support/futuremarketer-autopost/` |
+| **당근 로그인 정보**(전용 브라우저 프로필), **API 키** | Windows `%LOCALAPPDATA%\futuremarketer-autopost\` · macOS `~/Library/Application Support/futuremarketer-autopost/` |
 | 엑셀 사본, 사진 사본, **AI 가 만든 이미지**(`generated/`), 화면 캡처, 로그 | 위 폴더 아래 `data/` |
 
 로그인 정보·API 키·화면 캡처는 모두 **프로젝트 폴더 밖**에 둡니다. API 키는 DB·로그·`.env` 에 넣지 않고 계정 설정 화면에서만 넣습니다. 화면은 127.0.0.1 에서만 열립니다.

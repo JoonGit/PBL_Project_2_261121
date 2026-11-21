@@ -124,6 +124,8 @@ def test_worker_restarts_itself_with_new_code_when_idle(worker, monkeypatch):
     """화면만 새 코드로 바뀌고 워커는 옛 코드로 남아 새 작업(삭제)을 모르는 일이 없게, 쉬는 동안 코드가 바뀌면 다시 뜬다."""
     from futuremarketer import worker as worker_module
 
+    if worker_module.sys.platform == "win32":
+        pytest.skip("Windows에서는 앱 재시작으로 워커를 업데이트합니다.")
     stamps = iter([(10, 1.0), (10, 2.0)])
     monkeypatch.setattr(worker_module, "code_stamp", lambda: next(stamps))
     clock = iter([0.0, 0.0, 5.0, 5.0, 5.0, 5.0])

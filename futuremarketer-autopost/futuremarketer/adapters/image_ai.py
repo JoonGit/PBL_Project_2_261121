@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import base64
 import io
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+from ..config import ai_cli_path
 
 from .text_ai import AiError
 
@@ -138,12 +139,12 @@ class CodexCliImageGenerator:
     OUT_NAME = "out.png"
 
     def __init__(self, executable: str | None = None, timeout: int = 300):
-        self.executable = executable or shutil.which("codex")
+        self.executable = executable or ai_cli_path("codex")
         self.timeout = timeout
 
     @staticmethod
     def available() -> bool:
-        return shutil.which("codex") is not None
+        return ai_cli_path("codex") is not None
 
     def _require(self) -> str:
         if not self.executable:
@@ -161,7 +162,7 @@ class CodexCliImageGenerator:
             try:
                 proc = subprocess.run(
                     [exe, "exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--ephemeral", "-C", tmp, prompt],
-                    cwd=tmp, capture_output=True, text=True, timeout=self.timeout, stdin=subprocess.DEVNULL)
+                    cwd=tmp, capture_output=True, encoding="utf-8", errors="replace", timeout=self.timeout, stdin=subprocess.DEVNULL)
             except subprocess.TimeoutExpired as exc:
                 raise AiError("AI_TEMPORARY", "Codex 응답이 너무 오래 걸립니다.", transient=True) from exc
             out = Path(tmp) / self.OUT_NAME
@@ -180,7 +181,7 @@ class CodexCliImageGenerator:
 
     def check(self) -> str:
         exe = self._require()
-        proc = subprocess.run([exe, "login", "status"], capture_output=True, text=True, timeout=30,
+        proc = subprocess.run([exe, "login", "status"], capture_output=True, encoding="utf-8", errors="replace", timeout=30,
                               stdin=subprocess.DEVNULL)
         text = (proc.stdout + proc.stderr).strip()
         if proc.returncode != 0 or "logged in" not in text.lower():

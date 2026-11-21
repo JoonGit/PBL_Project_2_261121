@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +23,32 @@ APP_DIR_NAME = "futuremarketer-autopost"
 def _default_private_dir() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / APP_DIR_NAME
+    if sys.platform == "win32":
+        return _windows_local_app_data() / APP_DIR_NAME
     return Path.home() / f".{APP_DIR_NAME}"
+
+
+def _windows_local_app_data() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+
+
+def _default_aside_path() -> Path:
+    if sys.platform != "win32":
+        return Path("/Applications/Aside.app/Contents/MacOS/Aside")
+    local = _windows_local_app_data()
+    roots = [local / "Aside", local / "Programs" / "Aside"]
+    roots.extend(Path(os.environ[name]) / "Aside" for name in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)")
+                 if os.environ.get(name))
+    candidates = [root / subdir / "aside.exe" for root in roots for subdir in ("Application", "")]
+    return next((path for path in candidates if path.is_file()), candidates[0])
+
+
+def ai_cli_path(command: str) -> str | None:
+    # Windows 배치 파일에는 상품명이나 지침을 셸 인자로 넘기지 않는다.
+    executable = shutil.which(f"{command}.exe" if sys.platform == "win32" else command)
+    if sys.platform == "win32" and executable and Path(executable).suffix.lower() != ".exe":
+        return None
+    return executable
 
 
 def _path(value: str | None, fallback: Path) -> Path:
@@ -96,7 +122,7 @@ def load_settings(**overrides) -> Settings:
         private_dir=private_dir,
         default_excel=_path(env.get("FM_DEFAULT_EXCEL"), samples / "상품목록.xlsx"),
         image_dir=_path(env.get("FM_IMAGE_DIR"), samples / "images"),
-        aside_path=_path(env.get("FM_ASIDE_PATH"), Path("/Applications/Aside.app/Contents/MacOS/Aside")),
+        aside_path=_path(env.get("FM_ASIDE_PATH"), _default_aside_path()),
         cdp_port=int(env.get("FM_CDP_PORT") or 9339),
         daangn_target=(env.get("FM_DAANGN_TARGET") or "real").lower(),
         practice_port=int(env.get("FM_PRACTICE_PORT") or 18765),

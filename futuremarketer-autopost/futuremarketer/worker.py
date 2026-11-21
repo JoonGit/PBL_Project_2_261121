@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import io
 import logging
 import os
@@ -115,7 +114,8 @@ class Worker:
                 self.sleep(min(60.0, self.settings.poll_interval_sec * 2 ** min(failures, 6)))
                 continue
             if not worked:
-                if time.monotonic() - checked > 3:          # 하던 일이 없을 때만: 코드가 바뀌었으면 새 코드로 다시 뜬다
+                if sys.platform != "win32" and time.monotonic() - checked > 3:
+                    # Windows의 execv는 PID가 바뀌므로 앱을 재시작해 새 코드와 워커를 함께 적용한다.
                     checked = time.monotonic()
                     if code_stamp() != stamp:
                         raise CodeChanged
@@ -775,19 +775,27 @@ def short_path(path: Path) -> str:
         return str(path)
 
 
+def _lock_file(handle) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
 def acquire_lock(data_dir: Path):
     """워커는 하나만. 잠금을 얻지 못하면 None."""
     data_dir.mkdir(parents=True, exist_ok=True)
-    handle = open(data_dir / "worker.lock", "a+")
+    handle = open(data_dir / "worker.lock", "a+b")
     try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file(handle)
     except OSError:
         handle.close()
         return None
-    handle.seek(0)
-    handle.truncate()
-    handle.write(str(os.getpid()))
-    handle.flush()
     return handle
 
 
@@ -796,12 +804,11 @@ def worker_running(data_dir: Path) -> bool:
     path = data_dir / "worker.lock"
     if not path.exists():
         return False
-    with open(path, "a+") as handle:
+    with open(path, "a+b") as handle:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_file(handle)
         except OSError:
             return True
-        fcntl.flock(handle, fcntl.LOCK_UN)
         return False
 
 
