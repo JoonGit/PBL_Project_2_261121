@@ -36,9 +36,10 @@ from .adapters.text_ai import (MAX_TEXT_IMAGES, AiError, ClaudeApiTextGenerator,
                                MockTextGenerator)
 from .config import Settings, load_settings
 from .content import AMOUNT_RE, SALE_TERMS, TITLE_MAX, format_price, post_from_ai, post_from_script
-from .db import execute, fetch_all, fetch_one, make_engine, session_scope
+from .db import execute, fetch_all, fetch_one, make_app_db, session_scope
 from .db_init import ensure_schema
 from .defaults import STEPS
+from .filelock import lock_file
 from .repositories import core
 from .services import readiness, settings_service
 from .services.register_service import finish_product, finish_removal, job_place
@@ -234,7 +235,7 @@ class Worker:
                 cleanup = not conn["biz_id"]
             elif result:
                 # 다른 비즈프로필로 바꿔 연결했으면 앞 업체의 프로필 번호를 남기지 않는다(public_id 를 biz_id 보다 먼저 정한다)
-                execute(s, "UPDATE channel_connection SET public_id=IF(biz_id <=> :b, COALESCE(:pub, public_id), :pub),"
+                execute(s, "UPDATE channel_connection SET public_id=CASE WHEN biz_id=:b THEN COALESCE(:pub, public_id) ELSE :pub END,"
                            " profiles_json=:profiles, status='CONNECTED', target=:tg, biz_id=:b, biz_name=:n,"
                            " connected_at=:now, verified_at=:now, control_status='DONE', control_message='연결되었습니다.',"
                            " control_updated_at=:now, updated_at=:now WHERE id=1",
@@ -780,24 +781,12 @@ def short_path(path: Path) -> str:
         return str(path)
 
 
-def _lock_file(handle) -> None:
-    if os.name == "nt":
-        import msvcrt
-
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-
 def acquire_lock(data_dir: Path):
     """워커는 하나만. 잠금을 얻지 못하면 None."""
     data_dir.mkdir(parents=True, exist_ok=True)
     handle = open(data_dir / "worker.lock", "a+b")
     try:
-        _lock_file(handle)
+        lock_file(handle)
     except OSError:
         handle.close()
         return None
@@ -811,7 +800,7 @@ def worker_running(data_dir: Path) -> bool:
         return False
     with open(path, "a+b") as handle:
         try:
-            _lock_file(handle)
+            lock_file(handle)
         except OSError:
             return True
         return False
@@ -824,9 +813,9 @@ def main() -> int:
     if lock is None:
         print("워커가 이미 실행 중입니다.")
         return 0
-    engine = make_engine(settings.database_url)
+    engine = make_app_db(settings)
     if ensure_schema(engine, settings.target_code) == "outdated":
-        print("표 구조가 지금 코드와 다릅니다. `python -m futuremarketer.db_init --reset` 으로 다시 만드세요.")
+        print("저장 형식이 지금 코드와 다릅니다. 기존 기록을 백업한 뒤 프로젝트 버전을 확인하세요.")
         return 1
     worker = Worker(engine, settings, FileStore(settings.data_dir), SecretStore(settings.secrets_path))
     try:

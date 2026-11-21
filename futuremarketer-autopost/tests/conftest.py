@@ -1,4 +1,5 @@
-"""시험 공통: 시험 전용 MySQL DB 를 매 시험 비우고 다시 만든다.
+"""시험 공통: 기본으로 시험 전용 MySQL DB를 매번 다시 만든다.
+FM_TEST_BACKEND=json이면 임시 로컬 JSON 파일을 사용한다.
 
 FM_TEST_DATABASE_URL (기본: root@127.0.0.1:3317/futuremarketer_test). 이름이 _test 로 끝나야만 돈다.
 브라우저와 AI 는 가짜로 바꿔 끼운다(실제 브라우저 시험은 test_browser_practice.py).
@@ -22,14 +23,15 @@ from futuremarketer.adapters.daangn import SiteError
 from futuremarketer.adapters.image_ai import MockImageGenerator
 from futuremarketer.adapters.text_ai import MockTextGenerator
 from futuremarketer.config import load_settings
-from futuremarketer.db import execute, make_engine, session_scope
-from futuremarketer.db_init import apply_schema, seed
+from futuremarketer.db import execute, make_app_db, make_engine, session_scope
+from futuremarketer.db_init import apply_schema, ensure_schema, seed
 from futuremarketer.storage import FileStore, SecretStore
 from futuremarketer.util import utcnow
 from futuremarketer.worker import Worker
 
 TEST_URL = os.environ.get("FM_TEST_DATABASE_URL",
                           "mysql+pymysql://root:fm_root_local@127.0.0.1:3317/futuremarketer_test?charset=utf8mb4")
+TEST_BACKEND = os.environ.get("FM_TEST_BACKEND", "mysql")
 HEADER = ["상품코드", "상품명", "가격", "상품정보", "소식제목", "대본", "이미지"]
 
 
@@ -44,7 +46,12 @@ FAILURE_SCREEN = _jpeg((250, 210, 210))      # 가짜 「멈춘 순간」 화면
 
 
 @pytest.fixture
-def engine():
+def engine(settings):
+    if TEST_BACKEND == "json":
+        local = make_app_db(settings)
+        ensure_schema(local, "PRACTICE")
+        yield local
+        return
     url = make_url(TEST_URL)
     assert url.database and url.database.endswith("_test"), "시험 DB 이름은 _test 로 끝나야 합니다."
     admin = create_engine(url.set(database=""))
@@ -63,7 +70,7 @@ def engine():
 def settings(tmp_path):
     images = tmp_path / "images"
     images.mkdir()
-    return load_settings(database_url=TEST_URL, data_dir=tmp_path / "data", private_dir=tmp_path / "private",
+    return load_settings(database_url=TEST_URL, db_backend=TEST_BACKEND, data_dir=tmp_path / "data", private_dir=tmp_path / "private",
                          default_excel=tmp_path / "상품목록.xlsx", image_dir=images, daangn_target="practice",
                          ai_mode="live", poll_interval_sec=0, login_timeout_sec=5, action_delay_sec=0,
                          idle_browser_close_sec=0)

@@ -127,7 +127,7 @@ def news_today(session, place: tuple[str, str] | None) -> int:
     start_utc = start.astimezone(timezone.utc).replace(tzinfo=None)
     return fetch_one(session, "SELECT COUNT(*) AS n FROM task_job WHERE status = 'SUCCEEDED' AND finished_at >= :s"
                               " AND JSON_EXTRACT(request_json, '$.kind') IS NULL"
-                              " AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(steps_json, '$.NEWS.skipped')), 'false') <> 'true'"
+                              " AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(steps_json, '$.NEWS.skipped')), 'false') NOT IN ('true', '1')"
                               " AND JSON_UNQUOTE(JSON_EXTRACT(request_json, '$.target')) = :t"
                               " AND JSON_UNQUOTE(JSON_EXTRACT(request_json, '$.biz_id')) = :z",
                      s=start_utc, t=place[0], z=place[1])["n"]

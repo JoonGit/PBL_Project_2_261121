@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".venv", "venv", "__pycache__", ".pytest_cache", ".git", "var", "logs", ".idea", ".vscode"}
-SKIP_FILES = {".env", ".DS_Store"}
+SKIP_FILES = {".env", ".DS_Store", "app-state.json", "app-state.lock"}
 SKIP_SUFFIXES = {".pyc", ".pyo", ".log", ".zip"}
 
 
@@ -22,7 +22,7 @@ def included(path: Path) -> bool:
     relative = path.relative_to(ROOT)
     if any(part in SKIP_DIRS for part in relative.parts[:-1]):
         return False
-    return path.name not in SKIP_FILES and path.suffix not in SKIP_SUFFIXES
+    return path.name not in SKIP_FILES and not path.name.startswith(".app-state-") and path.suffix not in SKIP_SUFFIXES
 
 
 def main(argv: list[str]) -> int:

@@ -18,6 +18,7 @@ def app_env(monkeypatch, settings, engine):
     import ui.common as common
 
     monkeypatch.setenv("FM_DATABASE_URL", TEST_URL)
+    monkeypatch.setenv("FM_DB_BACKEND", settings.db_backend)
     monkeypatch.setenv("FM_DATA_DIR", str(settings.data_dir))
     monkeypatch.setenv("FM_PRIVATE_DIR", str(settings.private_dir))
     monkeypatch.setenv("FM_IMAGE_DIR", str(settings.image_dir))

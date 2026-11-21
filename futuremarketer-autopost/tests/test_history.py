@@ -11,7 +11,7 @@ from futuremarketer.content import fit_text, post_from_script
 from futuremarketer.db import execute, fetch_all, fetch_one, session_scope
 from futuremarketer.db_init import SCHEMA_VERSION, ensure_schema, schema_version
 from futuremarketer.services import query_service, register_service
-from tests.conftest import FAILURE_SCREEN, make_image, run_until_idle
+from tests.conftest import FAILURE_SCREEN, TEST_BACKEND, make_image, run_until_idle
 from tests.test_flow import enqueue, job_of, prepare
 from tests.test_ui_smoke import app_env, page_app  # noqa: F401  (화면 시험 준비를 같이 쓴다)
 
@@ -115,6 +115,7 @@ def test_fit_text_cuts_at_word_boundaries():
     assert len(post_from_script("상품", "[새상품] 바워스앤윌킨스 Px8 S2 프리미엄 무선 헤드폰", "본문")[0]) <= 30
 
 
+@pytest.mark.skipif(TEST_BACKEND == "json", reason="MySQL 스키마 마이그레이션 시험")
 def test_schema_3_database_is_upgraded_in_place(engine, store, settings, secrets, worker, hub):
     """한 판 아래(schema:3) DB 는 기록을 지우지 않고 올린다. 지난 기록의 끝난 줄에는 결과가 채워진다."""
     rows = headphone(engine, store, settings, secrets)

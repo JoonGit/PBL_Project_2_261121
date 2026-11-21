@@ -17,7 +17,7 @@ import streamlit as st
 from PIL import Image
 
 from futuremarketer.config import PROJECT_ROOT, load_settings
-from futuremarketer.db import make_engine
+from futuremarketer.db import make_app_db
 from futuremarketer.db_init import ensure_schema
 from futuremarketer.defaults import STEP_LABEL, STEPS
 from futuremarketer.errors import DomainError
@@ -101,7 +101,7 @@ h1{letter-spacing:-.02em}
 @st.cache_resource
 def _resources():
     settings = load_settings()
-    return settings, make_engine(settings.database_url), FileStore(settings.data_dir), SecretStore(settings.secrets_path)
+    return settings, make_app_db(settings), FileStore(settings.data_dir), SecretStore(settings.secrets_path)
 
 
 def settings():
@@ -176,15 +176,19 @@ def boot() -> bool:
         state = _boot()
     except Exception as exc:
         _boot.clear()
-        page_header("시작할 수 없습니다", "데이터베이스에 연결하지 못했습니다")
-        st.code("docker compose up -d", language="bash")
-        st.caption(f"MySQL 을 켠 뒤 새로 고쳐 주세요. ({type(exc).__name__})")
+        page_header("시작할 수 없습니다", "저장소를 열지 못했습니다")
+        if isinstance(exc, (DomainError, ValueError)):
+            st.caption(str(exc))
+        elif load_settings().db_backend == "mysql":
+            st.code("docker compose up -d", language="bash")
+            st.caption(f"MySQL을 켠 뒤 새로 고쳐 주세요. ({type(exc).__name__})")
+        else:
+            st.caption(f"로컬 JSON 파일과 데이터 폴더의 쓰기 권한을 확인하세요. ({type(exc).__name__})")
         return False
     if state == "outdated":
         _boot.clear()
-        page_header("시작할 수 없습니다", "DB 의 표 구조가 지금 코드와 다릅니다")
-        st.code("python -m futuremarketer.db_init --reset", language="bash")
-        st.caption("위 명령으로 표를 다시 만든 뒤 새로 고쳐 주세요. 기존 등록 기록은 지워집니다.")
+        page_header("시작할 수 없습니다", "저장 형식이 지금 코드와 다릅니다")
+        st.caption("기존 기록을 백업한 뒤 해당 저장소를 만든 프로젝트 버전을 확인하세요.")
         return False
     return True
 

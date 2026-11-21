@@ -8,3 +8,6 @@ var/
 logs/
 *.log
 .DS_Store
+app-state.json
+app-state.lock
+.app-state-*.tmp

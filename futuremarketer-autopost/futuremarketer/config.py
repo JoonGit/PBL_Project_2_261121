@@ -67,6 +67,7 @@ class Settings:
     daangn_target: str        # real: 실제 당근 비즈니스 / practice: 내 PC 의 연습용 화면
     practice_port: int
     ai_mode: str              # live: 설정 화면의 연결을 사용 / mock: 연결 없이 흉내만(시험·오프라인 연습)
+    db_backend: str = "mysql"
     claude_api_model: str = "claude-opus-5-5"
     claude_cli_model: str = "opus"
     openai_image_model: str = "gpt-image-2.5-sunburst"
@@ -85,10 +86,15 @@ class Settings:
     @property
     def browser_profile_dir(self) -> Path:
         """로그인 쿠키가 남는 전용 프로필. 실제·연습용을 섞지 않는다."""
-        return self.private_dir / f"browser-profile-{self.daangn_target}"
+        return self.profile_dir_for(self.daangn_target)
 
     def profile_dir_for(self, target: str) -> Path:
-        return self.private_dir / f"browser-profile-{target.lower()}"
+        prefix = "browser-profile-json" if self.db_backend == "json" else "browser-profile"
+        return self.private_dir / f"{prefix}-{target.lower()}"
+
+    @property
+    def json_path(self) -> Path:
+        return self.data_dir / "app-state.json"
 
     @property
     def target_code(self) -> str:
@@ -117,6 +123,8 @@ def load_settings(**overrides) -> Settings:
     private_dir = _path(env.get("FM_PRIVATE_DIR"), _default_private_dir())
     values = dict(
         database_url=env.get("FM_DATABASE_URL") or DEFAULT_DB_URL,
+        db_backend=(env.get("FM_DB_BACKEND") or ("mysql" if env.get("FM_DATABASE_URL") or "database_url" in overrides
+                                                else "json")).strip().lower(),
         # 화면 캡처와 로그에는 계정 화면이 담길 수 있어, 프로젝트 폴더가 아니라 개인 폴더에 둔다
         data_dir=_path(env.get("FM_DATA_DIR"), private_dir / "data"),
         private_dir=private_dir,
@@ -134,4 +142,6 @@ def load_settings(**overrides) -> Settings:
         browser_headless=(env.get("FM_BROWSER_HEADLESS") or "").lower() in ("1", "true", "yes"),
     )
     values.update(overrides)
+    if values["db_backend"] not in {"json", "mysql"}:
+        raise ValueError("FM_DB_BACKEND는 json 또는 mysql이어야 합니다.")
     return Settings(**values)

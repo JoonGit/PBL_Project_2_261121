@@ -12,8 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from .config import PROJECT_ROOT, load_settings
-from .db import execute, fetch_one, make_engine, session_scope
+from .db import Database, execute, fetch_one, make_app_db, session_scope
 from .defaults import DEFAULT_PROMPTS
+from .json_database import JsonDatabase, LocalSchemaOutdated
 from .util import new_id, utcnow
 
 SCHEMA_PATH = PROJECT_ROOT / "db" / "schema.sql"
@@ -34,7 +35,10 @@ def apply_schema(engine: Engine) -> None:
                 conn.execute(text(body))
 
 
-def drop_all(engine: Engine) -> None:
+def drop_all(engine: Database) -> None:
+    if isinstance(engine, JsonDatabase):
+        engine.reset()
+        return
     with engine.begin() as conn:
         conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
         for name in _existing(engine):
@@ -42,7 +46,7 @@ def drop_all(engine: Engine) -> None:
         conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
 
 
-def seed(engine: Engine, target: str = "REAL") -> None:
+def seed(engine: Database, target: str = "REAL") -> None:
     """초기 행을 준비하고, 활성 기본 지침이 달라졌다면 이전 판을 보존하며 갱신한다."""
     now = utcnow()
     with session_scope(engine) as s:
@@ -129,11 +133,18 @@ def _migrate_5_to_6(engine: Engine) -> None:
 MIGRATIONS = {"schema:3": _migrate_3_to_4, "schema:4": _migrate_4_to_5, "schema:5": _migrate_5_to_6}     # 이 판이면 → 이 함수로 다음 판으로 올린다(데이터는 그대로)
 
 
-def ensure_schema(engine: Engine, target: str = "REAL") -> str:
+def ensure_schema(engine: Database, target: str = "REAL") -> str:
     """앱이 뜰 때 부른다. 돌려주는 값: created / ready / outdated(표 구조가 지금 코드와 다르고 올릴 방법이 없음).
 
     한 판 아래의 표는 기록을 지우지 않고 그 자리에서 올린다(MIGRATIONS).
     """
+    if isinstance(engine, JsonDatabase):
+        existed = engine.path.is_file()
+        try:
+            seed(engine, target)
+        except LocalSchemaOutdated:
+            return "outdated"
+        return "ready" if existed else "created"
     if not _existing(engine):
         apply_schema(engine)
         seed(engine, target)
@@ -150,16 +161,19 @@ def ensure_schema(engine: Engine, target: str = "REAL") -> str:
 
 def main(argv: list[str]) -> int:
     settings = load_settings()
-    engine = make_engine(settings.database_url)
+    engine = make_app_db(settings)
     target = "PRACTICE" if settings.daangn_target == "practice" else "REAL"
     if "--reset" in argv:
         drop_all(engine)
-        print("기존 표를 지웠습니다.")
+        print("기존 작업 기록을 지웠습니다.")
     state = ensure_schema(engine, target)
     if state == "outdated":
-        print("표 구조가 지금 코드와 다릅니다. `python -m futuremarketer.db_init --reset` 으로 다시 만드세요.")
+        print("저장 형식이 지금 코드와 다릅니다. 기존 기록을 백업한 뒤 프로젝트 버전을 확인하세요.")
         return 1
-    print("표를 만들고 초기값을 넣었습니다." if state == "created" else "이미 준비되어 있습니다.")
+    if isinstance(engine, JsonDatabase):
+        print(f"로컬 JSON 저장소가 준비됐습니다. {engine.path}")
+    else:
+        print("표를 만들고 초기값을 넣었습니다." if state == "created" else "이미 준비되어 있습니다.")
     return 0
 
 

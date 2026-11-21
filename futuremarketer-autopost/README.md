@@ -21,7 +21,7 @@
   → 가격표(대표 사진·상품명·가격) → 소식(사진 모두 올린 뒤 제목·본문 → 다음 → 완료)
 ```
 
-구성은 단순합니다. 화면(Streamlit)과 자동화 엔진(워커)은 내 PC 에서 돌고, 기록은 Docker 로 띄운 MySQL 에 남고,
+화면(Streamlit)과 자동화 엔진(워커)은 내 PC에서 돌고, 상품과 작업 기록은 기본으로 로컬 JSON 파일에 저장합니다. MySQL을 쓰는 설치에서는 대신 MySQL에 기록합니다.
 워커가 Aside 브라우저를 열어 당근 비즈니스 화면을 조작합니다. 실제 당근에 올리기 전에 쓸 수 있는 **연습용 화면**도 들어 있습니다.
 
 ---
@@ -34,7 +34,7 @@
 |---|---|
 | 운영체제 | Windows와 macOS 설치 절차를 아래에 안내합니다. 실제 당근 등록·삭제 검증 기록은 macOS에서 얻었습니다. |
 | Python 3.12 | Windows에서는 `py -3.12 --version`, macOS에서는 `python3.12 --version`으로 확인합니다. [Python 공식 다운로드](https://www.python.org/downloads/) |
-| Docker Desktop | 설치 후 앱을 열어 둡니다. Windows에서는 MySQL용 Linux 컨테이너를 실행할 수 있도록 WSL 2 백엔드를 사용합니다. [Windows 설치](https://docs.docker.com/desktop/setup/install/windows-install/) · [macOS 설치](https://docs.docker.com/desktop/setup/install/mac-install/) |
+| Docker Desktop (MySQL 모드만) | 로컬 JSON 모드는 Docker 없이 실행합니다. MySQL 모드를 선택했다면 Excel 가져오기 전에 Docker를 실행합니다. Windows Docker는 Linux 컨테이너용 WSL 2 백엔드를 사용합니다. [Windows 설치](https://docs.docker.com/desktop/setup/install/windows-install/) · [macOS 설치](https://docs.docker.com/desktop/setup/install/mac-install/) |
 | Aside 브라우저 | 아래 설치 절차를 따릅니다. |
 | AI 연결 (둘 중 하나) | **API 키**(Anthropic, OpenAI) 또는 이 컴퓨터에 로그인된 **Claude Code·Codex 구독**. 둘 다 없어도 연습용(`FM_AI_MODE=mock`)으로는 끝까지 돌려 볼 수 있습니다. |
 | 당근 비즈니스 계정 | 실제로 올릴 때만. 연습용 화면에는 필요 없습니다. |
@@ -47,43 +47,52 @@
 
 ### Windows 프로젝트 세팅 순서
 
-Aside와 Docker Desktop을 설치한 뒤, **Windows PowerShell**에서 프로젝트 폴더(`futuremarketer-autopost`)를 열고 실행합니다. 이미 다른 컴퓨터에서 받은 프로젝트라면 이 컴퓨터에서 가상환경을 새로 만듭니다.
+Aside를 설치한 뒤 **Windows PowerShell**에서 프로젝트 폴더(`futuremarketer-autopost`)를 열고 실행합니다.
 
 ```powershell
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-py -3.12 -m venv .venv
-& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-docker compose up -d --wait
-$env:PYTHONUTF8 = "1"
-$env:PYTHONDONTWRITEBYTECODE = "1"
-& .\.venv\Scripts\python.exe scripts/check_setup.py
+.\scripts\setup.ps1
+.\scripts\check.ps1
 ```
 
-점검에서 필수 항목이 모두 **[통과]** 하면 다음을 실행하고 브라우저에서 http://127.0.0.1:8501 을 엽니다.
+스크립트 실행이 정책으로 차단되면 해당 명령만 아래처럼 다시 실행합니다.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
+```
+
+필수 항목이 모두 **[통과]** 하면 앱을 실행합니다.
 
 ```powershell
 & .\.venv\Scripts\python.exe -m streamlit run streamlit_app.py
 ```
 
-Windows에서 프로젝트 파일을 업데이트한 뒤에는 실행 중인 PowerShell에서 `Ctrl+C`를 눌러 앱을 끄고 위 실행 명령을 다시 입력합니다.
-Windows에서 구독 로그인을 사용할 때는 `claude.exe` 또는 `codex.exe`가 PowerShell의 PATH에서 검색돼야 합니다. API 키 방식과 대본·사진이 있는 상품은 이 실행 파일 없이 사용할 수 있습니다.
-
 ### macOS 프로젝트 세팅 순서
 
-프로젝트 폴더(`futuremarketer-autopost`)에서:
+Aside를 설치한 뒤 터미널에서 프로젝트 폴더(`futuremarketer-autopost`)를 열고 실행합니다.
 
 ```bash
-cp .env.example .env                       # 1. 설정 파일. 기본값 그대로 써도 됩니다
-docker compose up -d                       # 2. MySQL 8.4 (127.0.0.1:3317)
-python3.12 -m venv .venv                   # 3. 가상환경
-source .venv/bin/activate
-pip install -r requirements.txt            # 4. 패키지
-export PYTHONDONTWRITEBYTECODE=1           #    캐시 파일(.pyc)을 만들지 않습니다(내 PC 경로가 폴더에 남지 않게)
-python scripts/check_setup.py              # 5. 점검: 필수 항목이 모두 [통과] 인지
-python -m streamlit run streamlit_app.py   # 6. 실행
+bash scripts/setup.sh
+bash scripts/check.sh
 ```
 
-브라우저에서 http://127.0.0.1:8501 을 엽니다. DB 표는 처음 뜰 때 자동으로 만들어지고, 자동화 엔진(워커)도 화면과 함께 뜹니다. 화면을 끄면 워커도 꺼집니다.
+필수 항목이 모두 **[통과]** 하면 앱을 실행합니다.
+
+```bash
+.venv/bin/python -m streamlit run streamlit_app.py
+```
+
+두 운영체제 모두 브라우저에서 http://127.0.0.1:8501 을 엽니다. 자동화 워커도 앱과 함께 시작됩니다.
+
+- **설치 스크립트**는 현재 PC의 `.venv`에 패키지를 설치하고, `.env`가 없으면 기본 설정을 복사한 뒤 점검까지 실행합니다. 다른 PC에서 복사한 `.venv`가 있으면 이름을 바꾸고 다시 실행합니다.
+- **점검 스크립트**는 라이브러리, 설정, 저장소, 샘플 파일을 검사합니다. 임시 Aside 프로필로 로컬 페이지를 열어 브라우저 연결까지 확인합니다. 문제가 있으면 **[확인 필요]** 항목을 고친 뒤 점검만 다시 실행합니다.
+- 패키지나 프로젝트 파일을 업데이트했으면 앱 터미널에서 `Ctrl+C`를 누른 뒤 설치 스크립트와 앱 실행 명령을 다시 실행합니다.
+
+### 로컬 JSON과 MySQL 선택
+
+- **로컬 JSON**을 쓰려면 `.env`에 `FM_DB_BACKEND=json`을 설정합니다. 새로 복사한 `.env.example`의 기본값입니다. 상품·작업·프롬프트는 앱 데이터 폴더의 `app-state.json`에 저장합니다.
+- **MySQL**을 쓰려면 `FM_DB_BACKEND=mysql`을 설정합니다. 로컬 Docker MySQL을 쓸 경우 Docker Desktop을 켠 뒤 설치 스크립트를 실행하면 컨테이너도 시작합니다. 외부 MySQL은 해당 서버를 먼저 시작한 뒤 점검 스크립트를 실행합니다. 기존 `.env`에 `FM_DATABASE_URL`만 있는 설치도 계속 MySQL을 사용합니다.
+- 저장 방식을 바꿀 때는 앱을 종료한 뒤 설정을 수정하고 다시 실행합니다. 두 방식의 상품·작업 이력은 각각 저장됩니다. JSON으로 처음 전환했다면 엑셀을 다시 불러오고 당근 계정을 연결합니다.
 
 > Playwright 는 Aside 에 붙어서 조작하므로 `playwright install` 로 브라우저를 따로 받을 필요가 없습니다.
 
@@ -97,8 +106,9 @@ python -m streamlit run streamlit_app.py   # 6. 실행
 
 | 증상 | 해결 |
 |---|---|
-| "데이터베이스에 연결하지 못했습니다" | Docker Desktop 이 켜져 있는지 확인하고 `docker compose up -d`. 처음 뜰 때는 10~20초 걸립니다. |
-| "표 구조가 지금 코드와 다릅니다" | 아주 오래된 DB 입니다. `python -m futuremarketer.db_init --reset` (등록 기록이 지워집니다) |
+| "저장소를 열지 못했습니다" | JSON 모드에서는 앱 데이터 폴더의 쓰기 권한과 `app-state.json`을 확인합니다. MySQL 모드에서는 Docker Desktop을 켜고 `docker compose up -d --wait`를 실행합니다. |
+| 저장 형식이 바뀌었다는 메시지가 나옴 | 기존 기록을 먼저 백업하고, 해당 파일을 만든 프로젝트 버전으로 열 수 있는지 확인합니다. |
+| 기존 가상환경을 사용할 수 없다고 나옴 | 현재 `.venv` 폴더의 이름을 바꾸고 이 PC에서 설치 스크립트를 다시 실행합니다. |
 | 3317 포트를 이미 쓰고 있음 | `docker-compose.yml` 의 `127.0.0.1:3317` 과 `.env` 의 두 DB 주소에서 포트를 같이 바꿉니다. |
 | "Aside 브라우저를 찾지 못했습니다" | [Aside 브라우저 설치](#aside-브라우저-설치)를 따라 설치합니다. 자동으로 찾지 못하면 `.env`의 `FM_ASIDE_PATH`에 실제 실행 파일 경로를 적습니다. |
 | 구독 로그인 "연결 확인" 실패 | 터미널에서 `claude`, `codex` 를 한 번 실행해 로그인을 마치고, 최신 버전으로 올립니다. |
@@ -129,23 +139,20 @@ Claude Code, Codex, Cursor 같은 AI 코딩 도구에게 이 폴더를 열어 �
 - API 키·비밀번호를 `.env`, 코드, 로그, 대화에 적지 않는다. API 키는 사용자가 앱의 계정 설정 화면에서 직접 넣는다.
 - 당근 로그인, Claude Code·Codex 로그인, Docker Desktop·Aside 설치처럼 사람이 해야 하는 일은 대신 하지 않는다. 무엇을 하면 되는지 짧게 알려 주고 기다린다.
 - 기존 DB 를 지우는 명령(`db_init --reset`, `docker compose down -v`)은 사용자가 허락할 때만 쓴다.
-- `.env` 의 `FM_DAANGN_TARGET` 을 사용자 허락 없이 바꾸지 않는다. 실제 ↔ 연습용을 바꿔 앱을 켜면 **이미 연결된 당근 로그인이 해제되고 지워진다.** 자동 시험(7·8번)은 시험 전용 DB 와 임시 폴더를 쓰므로 사용자의 연결에 영향이 없다.
+- `.env` 의 `FM_DAANGN_TARGET` 을 사용자 허락 없이 바꾸지 않는다. 실제 ↔ 연습용을 바꿔 앱을 켜면 **이미 연결된 당근 로그인이 해제되고 지워진다.** 자동 시험은 임시 JSON 파일 또는 시험 전용 DB와 임시 폴더를 쓰므로 사용자의 연결에 영향이 없다.
 - 프로젝트 파일은 고치지 않는다. 세팅에 필요한 것은 `.env` 와 `.venv` 뿐이다.
 
 **순서** — 각 단계의 「확인」이 맞아야 다음 단계로 간다.
 
 | # | 할 일 | 확인 |
 |---|---|---|
-| 1 | Windows 또는 macOS를 확인하고 해당 설치 절차에서 Python 3.12, Docker Desktop, Aside를 점검한다. | 빠진 도구가 있으면 해당 운영체제의 공식 설치 안내를 공유한다. |
-| 2 | Docker 가 켜져 있는지: `docker info` | 실패하면 "Docker Desktop 을 켜 주세요"라고 하고 기다린다. |
-| 3 | `.env` 가 없으면 `cp .env.example .env` | 이미 있으면 덮어쓰지 않는다. |
-| 4 | `docker compose up -d` 후 `docker compose ps` | `fm-autopost-mysql` 이 `healthy` 가 될 때까지 기다린다(최대 1분). 3317 포트 충돌이면 사용자에게 알린다. |
-| 5 | `python3.12 -m venv .venv` → `.venv/bin/pip install -r requirements.txt` | 오류 없이 끝나는지 |
-| 6 | `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check_setup.py` | 필수 항목이 모두 `[통과]` 이고 종료 코드 0. `[확인 필요]` 줄의 안내대로 고치고 다시 돌린다. |
-| 7 | `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q` | DB·화면·등록 흐름 테스트가 통과합니다. Aside를 사용하는 시험은 8번에서 실행합니다. |
-| 8 | (Aside 가 있으면) `PYTHONDONTWRITEBYTECODE=1 FM_BROWSER_TESTS=1 .venv/bin/python -m pytest -q tests/test_browser_practice.py` | 통과. Aside 를 창 없이 띄워 연습용 화면에 실제로 가격·소식을 올려 본다. |
-| 9 | 앱 실행: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m streamlit run streamlit_app.py` (백그라운드로) | `curl -s http://127.0.0.1:8501/_stcore/health` 가 `ok` |
-| 10 | 사용자에게 알린다 | 아래 「끝나면 사용자에게 알려 줄 것」 |
+| 1 | 운영체제에 맞춰 Python 3.12와 Aside 설치 상태를 확인한다. | 빠진 도구가 있으면 해당 운영체제의 설치 안내를 공유한다. |
+| 2 | 기존 `.env` 또는 사용자의 선택에 맞춰 저장 방식을 확인한다. 새 설치는 로컬 JSON을 사용한다. | 로컬 Docker MySQL 모드에서만 Docker Desktop 실행 상태를 확인한다. |
+| 3 | 해당 운영체제의 설치 스크립트를 실행한다. | 필수 항목이 모두 `[통과]`이고 종료 코드가 0이다. |
+| 4 | 필요하면 해당 운영체제의 점검 스크립트를 다시 실행한다. | `[확인 필요]` 줄의 안내대로 고치고 재검사한다. |
+| 5 | [시험](#시험)의 로컬 JSON 테스트를 실행한다. | 상품 저장·화면·등록 흐름이 통과한다. |
+| 6 | 필요하면 `FM_BROWSER_TESTS=1`로 Aside 시험을 실행한다. | Aside가 임시 프로필로 연습 화면을 조작한다. |
+| 7 | 해당 운영체제의 명령으로 앱을 실행하고 `http://127.0.0.1:8501/_stcore/health`에서 `ok`를 확인한다. | 사용자에게 점검 결과와 접속 주소를 알린다. |
 
 **끝나면 사용자에게 알려 줄 것**
 
@@ -261,17 +268,20 @@ futuremarketer/
     daangn.py               당근 화면 조작(로그인 대기, 가격 등록, 소식 등록)
   practice/server.py        연습용 화면
 db/schema.sql               MySQL 8.4 표 9개
+db/local_schema.sql         JSON 자료를 메모리에서 조회할 때 쓰는 표 구조
 samples/                    기본 연결 엑셀과 이미지
-scripts/check_setup.py      로컬 세팅 점검(사람·AI 도구 공용)
+scripts/setup.sh/.ps1       macOS/Windows 설치
+scripts/check.sh/.ps1       macOS/Windows 실행 전 점검
+scripts/check_setup.py      설치 및 점검 스크립트에서 사용하는 공통 검사
 scripts/make_share_zip.py   공유용 묶음 만들기
-tests/                      시험(실제 MySQL 사용)
+tests/                      JSON·MySQL 저장 및 브라우저 자동화 시험
 ```
 
 ### 무엇이 어디에 저장되나
 
 | 내용 | 위치 |
 |---|---|
-| 상품, 작업, 진행 기록, 연결 방식 | MySQL (Docker 볼륨) |
+| 상품, 작업, 진행 기록, 연결 방식 | JSON 모드의 `data/app-state.json` 또는 MySQL의 Docker 볼륨 |
 | **당근 로그인 정보**(전용 브라우저 프로필), **API 키** | Windows `%LOCALAPPDATA%\futuremarketer-autopost\` · macOS `~/Library/Application Support/futuremarketer-autopost/` |
 | 엑셀 사본, 사진 사본, **AI 가 만든 이미지**(`generated/`), 화면 캡처, 로그 | 위 폴더 아래 `data/` |
 
@@ -294,29 +304,40 @@ Git 으로 공유한다면 `.gitignore` 가 같은 것들을 제외합니다.
 
 ### 시험
 
-세팅이 맞는지 가장 확실히 보는 방법이기도 합니다.
+Docker 없이 로컬 JSON으로 시험합니다.
 
 ```bash
-docker compose up -d
-pytest -q                                                     # 불러오기, 등록 흐름, 화면, 한 번 틀렸던 자리
-FM_BROWSER_TESTS=1 pytest tests/test_browser_practice.py -q   # Aside 로 연습용 화면을 실제 조작(창 없이)
+FM_TEST_BACKEND=json .venv/bin/python -m pytest -q
+FM_TEST_BACKEND=json FM_BROWSER_TESTS=1 .venv/bin/python -m pytest -q tests/test_browser_practice.py
 ```
 
-시험은 이름이 `_test` 로 끝나는 DB 를 매번 지우고 다시 만듭니다. 브라우저와 AI 는 가짜로 바꿔 끼우고, 실제 Aside 조작은 두 번째 명령으로 따로 확인합니다.
+Windows PowerShell에서는 아래처럼 실행합니다. 실제 Aside 시험에는 `$env:FM_BROWSER_TESTS = '1'`을 추가합니다.
+
+```powershell
+$env:FM_TEST_BACKEND = 'json'
+& .\.venv\Scripts\python.exe -m pytest -q
+```
+
+MySQL 모드를 시험하려면 Docker를 시작하고 `FM_TEST_BACKEND`를 해제한 뒤 같은 테스트를 실행합니다. 시험용 MySQL은 이름이 `_test`로 끝나는 DB를 다시 만들고, 로컬 JSON 시험은 임시 폴더를 사용합니다.
 
 ### 검증 결과 (2026-11-21 기준)
 
-시험 전용 MySQL과 Aside로 `FM_BROWSER_TESTS=1 pytest -q`를 실행해 91개 테스트가 통과했습니다.
+- macOS의 빈 프로젝트 복사본에서 패키지 설치와 로컬 JSON 파일 생성, 임시 Aside 프로필 연결을 확인했습니다.
+- MySQL에 접속할 수 없는 설정에서 앱과 별도 워커를 띄워 연습용 가격표를 등록·삭제했습니다. `app-state.json`을 다시 열어 두 작업 기록이 남는 것을 확인했습니다.
+- 로컬 JSON 전체 테스트는 Aside 연습 등록·삭제를 포함해 99개가 통과했습니다. MySQL 전용 검사 2개는 MySQL 회귀 테스트에서 확인했으며, MySQL 회귀 테스트는 98개가 통과했습니다.
+- Windows용 설치와 점검 명령을 제공합니다. Windows 실기기에서의 설치·Aside 실행은 확인 전입니다.
 
-#### 발표 자료에 넣을 작업 녹화
+#### 실제 가격표 작업 녹화와 캡처
 
-세 영상은 작업 창 전체와 커서, 처리 대기 시간을 이어서 녹화했습니다. 계정 식별 정보와 개인 폴더 경로는 가렸습니다. [작업녹화 폴더](../발표영상/작업녹화/)
-
-| 영상 | 환경과 마지막 장면 |
+| 영상 | 실제 당근 비즈니스에서 확인한 작업 |
 | --- | --- |
-| [① 상품 등록 직전 · 29초](../발표영상/작업녹화/01-상품등록-직전.mp4) | 실제 계정에서 P001 안경을 선택해 초안을 준비합니다. 당근의 소식 작성 제한 안내를 확인하고 앱에서 새 대본과 사진 2장을 펼칩니다. |
-| [② 상품 삭제 확인창 · 9초](../발표영상/작업녹화/02-상품삭제-확인창-연습.mp4) | 실제 계정에는 삭제할 등록 상품이 없어 연습 환경을 사용했습니다. 대시보드에서 P006 캠핑 테이블의 삭제 확인창까지 이동합니다. 마지막 ‘지우기’ 버튼 앞에서 끝납니다. |
-| [③ AI 제작 후 등록 직전 · 58초](../발표영상/작업녹화/03-AI제작후-등록직전.mp4) | 실제 계정에 연결한 앱에서 P006을 선택합니다. Claude 글과 OpenAI 이미지 1장을 생성하는 시간을 그대로 볼 수 있고, 마지막에는 앱에서 결과를 확인합니다. |
+| [가격표 등록](../발표영상/발표영상/01-가격표-등록.mp4) | ‘가격표만’ 선택 후 금액·원고·사진을 넣고 저장 결과를 확인합니다. |
+| [가격표 삭제](../발표영상/발표영상/02-가격표-삭제.mp4) | 앱에서 삭제를 시작하고 당근 가격표에서 항목이 사라진 것을 확인합니다. |
+| [AI 제작 후 가격표 등록](../발표영상/발표영상/03-AI-가격표-등록.mp4) | 새 이미지를 생성하고 실제 가격표에 붙은 것을 확인합니다. 생성 대기 구간은 줄였습니다. |
+
+각 영상의 주요 단계에 설명을 넣은 캡처도 있습니다. [단계별 캡처 9장](../발표영상/발표영상/캡처/)
+
+이전 소식 제한 화면과 초안 준비를 담은 영상은 [작업녹화 폴더](../발표영상/작업녹화/)에 있습니다.
 
 #### 실제 당근과 연습 환경에서 확인한 결과
 
@@ -336,4 +357,4 @@ FM_BROWSER_TESTS=1 pytest tests/test_browser_practice.py -q   # Aside 로 연습
 - 당근 비즈프로필 소식은 하루 5개까지 올릴 수 있습니다. 대시보드에 오늘 올린 수가 보입니다.
 - 내 계정에 사람이 하듯 올리는 방식이지만, 자동 프로그램 사용은 서비스 운영정책의 제한을 받을 수 있습니다. 실제 계정에 쓰기 전에 정책을 확인하고, 적은 수로 천천히 올리세요.
 - 직접 작성한 소식 대본은 문구를 그대로 사용합니다. 새 엑셀을 올리기 전에 안내 문구와 상품 정보를 확인하세요.
-- 현재 DB 구조는 `schema:6`입니다. `schema:3`·`schema:4`·`schema:5`는 앱을 켤 때 기록을 지우지 않고 순서대로 올립니다. 지원하지 않는 구조라 "표 구조가 지금 코드와 다릅니다"가 나오면 먼저 기존 데이터를 백업하고 초기화 필요 여부를 확인하세요. `python -m futuremarketer.db_init --reset`은 등록 기록을 지우므로 초기화하기로 결정한 경우에만 실행합니다.
+- 현재 MySQL DB 구조는 `schema:6`입니다. `schema:3`·`schema:4`·`schema:5`는 앱을 켤 때 기록을 지우지 않고 순서대로 올립니다. 지원하지 않는 구조라 "표 구조가 지금 코드와 다릅니다"가 나오면 먼저 기존 데이터를 백업하고 초기화 필요 여부를 확인하세요. `python -m futuremarketer.db_init --reset`은 등록 기록을 지우므로 초기화하기로 결정한 경우에만 실행합니다.

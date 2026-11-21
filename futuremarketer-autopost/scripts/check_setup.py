@@ -3,14 +3,20 @@
     python scripts/check_setup.py
 
 항목마다 [통과] / [확인 필요] / [선택] 을 출력한다. 필수 항목이 모두 통과하면 종료 코드 0.
-아무것도 바꾸지 않는다(읽기만 한다). 단, DB 표가 없으면 처음 뜰 때처럼 만든다.
+저장소가 비어 있으면 초기화한다. --browser는 임시 프로필로 Aside를 검사하고,
+--start-mysql은 필요한 경우 로컬 MySQL 컨테이너를 시작한다.
 """
 from __future__ import annotations
 
+import argparse
+import platform
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -34,8 +40,98 @@ def port_open(host: str, port: int) -> bool:
         return False
 
 
-def main() -> int:
+def probe_aside(settings) -> None:
+    from futuremarketer.adapters.aside import AsideBrowser
+
+    class Page(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b'<main id="fm-ready">Futuremarketer setup check</main>')
+
+        def log_message(self, *args):
+            pass
+
+    with tempfile.TemporaryDirectory(prefix="fm-browser-check-") as tmp:
+        with socket.socket() as candidate:
+            candidate.bind(("127.0.0.1", 0))
+            cdp_port = candidate.getsockname()[1]
+        with ThreadingHTTPServer(("127.0.0.1", 0), Page) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            browser = AsideBrowser(settings.aside_path, Path(tmp) / "profile", cdp_port, (40, 40, 900, 700), headless=True)
+            try:
+                page = browser.start(f"http://127.0.0.1:{server.server_port}/")
+                page.locator("#fm-ready").wait_for(timeout=8000)
+            finally:
+                browser.close()
+                server.shutdown()
+                thread.join()
+
+
+def check_mysql(settings, start_mysql: bool) -> None:
+    from sqlalchemy.engine import make_url
+
+    url = make_url(settings.database_url)
+    host, port = url.host or "127.0.0.1", url.port or 3306
+    if start_mysql and host in ("127.0.0.1", "localhost", "::1") and not port_open(host, port):
+        docker = shutil.which("docker")
+        if check("Docker 명령", docker is not None, hint="Docker Desktop을 설치하고 실행하세요."):
+            try:
+                proc = subprocess.run([docker, "compose", "up", "-d", "--wait"], cwd=ROOT, timeout=180)
+                check("MySQL 컨테이너 시작", proc.returncode == 0, hint="Docker Desktop의 실행 상태를 확인하세요.")
+            except (OSError, subprocess.TimeoutExpired):
+                check("MySQL 컨테이너 시작", False, hint="Docker Desktop의 실행 상태를 확인하세요.")
+    check(f"MySQL({host}:{port})", port_open(host, port),
+          hint="설정한 MySQL을 실행하세요. Docker를 쓰면 docker compose up -d --wait를 실행하세요.")
+
+
+def check_app_storage(start_mysql: bool, browser_test: bool) -> None:
+    from futuremarketer.config import load_settings
+    from futuremarketer.db import make_app_db
+    from futuremarketer.db_init import ensure_schema
+
+    try:
+        settings = load_settings()
+        local = settings.db_backend == "json"
+        if not local:
+            check_mysql(settings, start_mysql)
+    except ValueError as exc:
+        check("프로젝트 설정", False, str(exc), hint=".env 값을 확인하세요.")
+        return
+
+    storage = "로컬 JSON 저장소" if local else "MySQL 저장소"
+    try:
+        state = ensure_schema(make_app_db(settings), settings.target_code)
+        check(storage, state != "outdated", str(settings.json_path) if local else state,
+              hint="저장 형식이 바뀌었습니다. 기록을 백업한 뒤 확인하세요.")
+    except Exception as exc:
+        hint = "데이터 폴더의 쓰기 권한과 JSON 파일을 확인하세요" if local else "MySQL을 시작한 뒤 다시 실행하세요"
+        check(storage, False, f"저장소를 열지 못했습니다({type(exc).__name__}).", hint=hint)
+
+    if check("Aside 브라우저", settings.aside_path.is_file(), str(settings.aside_path),
+             hint="aside.com/download에서 설치하거나 .env의 FM_ASIDE_PATH에 실행 파일 경로를 적으세요") and browser_test:
+        try:
+            probe_aside(settings)
+            check("Aside 실행 및 연결", True, "임시 프로필로 로컬 화면까지 열었습니다.")
+        except Exception as exc:
+            check("Aside 실행 및 연결", False, type(exc).__name__,
+                  hint="운영체제에 맞는 Aside 설치 파일인지와 FM_ASIDE_PATH를 확인하세요.")
+
+    check("엑셀·사진 샘플", settings.default_excel.is_file() and settings.image_dir.is_dir(),
+          f"{settings.default_excel.name}, {settings.image_dir.name}/")
+    check("등록 대상", True, f"{settings.daangn_target} (practice 면 연습용 화면), AI={settings.ai_mode}", required=False)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="퓨처마케터 실행 전 준비 상태를 확인합니다.")
+    parser.add_argument("--browser", action="store_true", help="임시 프로필로 Aside 브라우저 연결을 검사합니다.")
+    parser.add_argument("--start-mysql", action="store_true", help="MySQL 모드에서만 로컬 Docker 컨테이너를 시작합니다.")
+    args = parser.parse_args(argv)
+    results.clear()
     windows = sys.platform == "win32"
+    check("실행 환경", True, f"{platform.system()} {platform.release()} / {platform.machine()}")
     check("Python 3.12 이상", sys.version_info >= (3, 12), sys.version.split()[0])
     python_cmd = r".\.venv\Scripts\python.exe" if windows else ".venv/bin/python"
     check("가상환경(.venv) 안에서 실행", sys.prefix != sys.base_prefix,
@@ -50,26 +146,8 @@ def main() -> int:
             missing.append(module)
     check("파이썬 패키지", not missing, ("없음: " + ", ".join(missing) + " → pip install -r requirements.txt") if missing else "")
 
-    check("Docker 명령", shutil.which("docker") is not None, hint="Docker Desktop 을 설치하고 켜 두세요")
-    check("MySQL(127.0.0.1:3317)", port_open("127.0.0.1", 3317), hint="docker compose up -d")
-
     if not missing:
-        from futuremarketer.config import load_settings
-        from futuremarketer.db import make_engine
-        from futuremarketer.db_init import ensure_schema
-
-        settings = load_settings()
-        try:
-            state = ensure_schema(make_engine(settings.database_url), settings.target_code)
-            check("DB 표", state != "outdated",
-                  "python -m futuremarketer.db_init --reset (기록이 지워집니다)" if state == "outdated" else state)
-        except Exception as exc:  # 접속 실패 등
-            check("DB 표", False, f"DB 에 접속하지 못했습니다({type(exc).__name__}). MySQL 이 뜬 지 몇 초 뒤 다시 실행하세요")
-        check("Aside 브라우저", settings.aside_path.is_file(), str(settings.aside_path),
-              hint="aside.com/download에서 설치하거나 .env의 FM_ASIDE_PATH에 실행 파일 경로를 적으세요")
-        check("엑셀·사진 샘플", settings.default_excel.is_file() and settings.image_dir.is_dir(),
-              f"{settings.default_excel.name}, {settings.image_dir.name}/")
-        check("등록 대상", True, f"{settings.daangn_target} (practice 면 연습용 화면), AI={settings.ai_mode}", required=False)
+        check_app_storage(args.start_mysql, args.browser)
 
     for name, command, use in (("Claude Code", "claude", "글 작성을 구독 로그인으로 쓸 때"),
                                ("Codex", "codex", "이미지 생성을 구독 로그인으로 쓸 때")):

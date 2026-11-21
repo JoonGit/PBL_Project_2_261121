@@ -17,7 +17,7 @@ from futuremarketer.content import foreign_amounts
 from futuremarketer.db import execute, fetch_one, session_scope
 from futuremarketer.services import import_service, query_service, register_service, settings_service
 from futuremarketer.util import utcnow
-from tests.conftest import connect, make_image, make_xlsx, run_until_idle, set_ai
+from tests.conftest import TEST_BACKEND, connect, make_image, make_xlsx, run_until_idle, set_ai
 from tests.test_flow import SCRIPT, enqueue, job_of, prepare, product_of, query_rows
 
 
@@ -357,6 +357,7 @@ def test_share_bundle_leaves_local_traces_out(tmp_path):
 
 
 # --- 표 구조 판 ---------------------------------------------------------------------
+@pytest.mark.skipif(TEST_BACKEND == "json", reason="MySQL 스키마 메타데이터 시험")
 def test_old_table_layout_is_detected(engine):
     from sqlalchemy import text
 

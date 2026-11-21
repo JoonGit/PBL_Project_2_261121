@@ -15,6 +15,7 @@ from futuremarketer.defaults import DEFAULT_PROMPTS
 from futuremarketer.errors import DomainError
 from futuremarketer.services import import_service, query_service, register_service, settings_service
 from futuremarketer.worker import Worker
+from futuremarketer.util import new_id
 from tests.conftest import connect, make_image, make_xlsx, run_until_idle, set_ai
 
 SCRIPT = "아끼던 안경을 판매합니다.\n상태 좋습니다. 채팅 주세요."
@@ -368,9 +369,9 @@ def test_one_active_job_per_product_is_enforced_by_db(engine, store, settings, s
     job = job_of(engine, "U1")
     with pytest.raises(Exception) as err, session_scope(engine) as s:
         execute(s, "INSERT INTO task_job (id, run_id, product_id, status, steps_json, request_json, idempotency_key, created_at)"
-                   " SELECT UUID(), run_id, product_id, 'QUEUED', steps_json, request_json, 'other-key', created_at"
-                   " FROM task_job WHERE id = :id", id=job["id"])
-    assert "uq_job_active" in str(err.value)
+                   " SELECT :new, run_id, product_id, 'QUEUED', steps_json, request_json, 'other-key', created_at"
+                   " FROM task_job WHERE id = :id", id=job["id"], new=new_id())
+    assert "uq_job_active" in str(err.value) or "task_job.active_product_guard" in str(err.value)
 
 
 def test_expired_login_stops_the_whole_queue(engine, store, settings, secrets, worker, hub):
@@ -437,7 +438,8 @@ def test_connect_then_disconnect(engine, settings, secrets, worker, hub, removed
     conn = settings_service.overview(engine, secrets, settings)["connection"]
     assert conn["status"] == "DISCONNECTED" and conn["biz_id"] is None and conn["connected_at"] is None
     assert removed_profiles == [settings.browser_profile_dir]                  # 저장된 로그인 정보를 지운다
-    assert settings.browser_profile_dir.name == "browser-profile-practice"
+    expected = "browser-profile-json-practice" if settings.db_backend == "json" else "browser-profile-practice"
+    assert settings.browser_profile_dir.name == expected
     assert settings.private_dir in settings.browser_profile_dir.parents       # 프로젝트 폴더가 아니라 개인 폴더
 
 
