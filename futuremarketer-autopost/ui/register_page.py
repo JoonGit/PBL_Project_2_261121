@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from base64 import b64encode
+from io import BytesIO
 from pathlib import Path
 
 import streamlit as st
+from PIL import Image
 
 from futuremarketer.services import import_service, query_service, register_service
 from ui import common
@@ -133,13 +135,16 @@ def _image_preview(image_key: str, name: str) -> None:
 
 
 def _image_button(thumbnail: str, image_key: str, name: str, *, key: str, width: int) -> None:
-    encoded = b64encode(Path(thumbnail).read_bytes()).decode("ascii")
+    data = Path(thumbnail).read_bytes()
+    encoded = b64encode(data).decode("ascii")
+    with Image.open(BytesIO(data)) as image:
+        image_width, image_height = image.size
     st.html(f"""
         <style>
         .st-key-{key} button {{
             width: min(100%, {width}px);
             min-height: 0;
-            aspect-ratio: 1;
+            aspect-ratio: {image_width} / {image_height};
             padding: 0;
             background: center / contain no-repeat url("data:image/jpeg;base64,{encoded}");
         }}
@@ -152,7 +157,7 @@ def _image_button(thumbnail: str, image_key: str, name: str, *, key: str, width:
         }}
         </style>
     """)
-    if st.button("상품 사진 크게 보기", key=key, help=f"{name} 사진 크게 보기"):
+    if st.button("상품 사진 크게 보기", key=key, help=f"{name} 사진 크게 보기", width="stretch"):
         _image_preview(image_key, name)
 
 
@@ -185,13 +190,13 @@ def _row_text(row: dict) -> str:
 
 def _row(row: dict) -> None:
     with st.container(border=True):
-        sel, img, main, price, state = st.columns([0.5, 1.1, 5.4, 1.8, 2.2], gap="small", vertical_alignment="center")
+        sel, img, main, price, state = st.columns([0.5, 1.65, 4.85, 1.8, 2.2], gap="small", vertical_alignment="center")
         with sel:
             st.checkbox("선택", key=f"sel_{row['id']}", disabled=not row["selectable"], label_visibility="collapsed")
         with img:
             path = common.thumb(row["thumb_key"])
             if path:
-                _image_button(path, row["thumb_key"], row["name"], key=f"product_photo_{row['id']}", width=48)
+                _image_button(path, row["thumb_key"], row["name"], key=f"product_photo_{row['id']}", width=72)
             else:
                 st.html('<div class="fm-noimg">없음</div>')
         main.html(_row_text(row))
@@ -208,7 +213,7 @@ def _row(row: dict) -> None:
                     path = common.preview(key, width=220)
                     if path:
                         _image_button(path, key, f"{row['name']} · 사진 {index + 1}",
-                                      key=f"draft_photo_{row['id']}_{index}", width=160)
+                                      key=f"draft_photo_{row['id']}_{index}", width=220)
         if row["state"] == "NEEDS_CHECK" and job:
             _a, yes, no = st.columns([1.35, 2.2, 2.2])
             yes.button("당근에 올라가 있음", key=f"ok_{job['id']}", on_click=_resolve, args=(job["id"], "DONE"), width="stretch")
