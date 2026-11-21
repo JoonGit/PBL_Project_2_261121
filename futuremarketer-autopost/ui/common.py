@@ -219,8 +219,11 @@ def steps_html(steps: dict | None) -> str:
         return ""
     parts = []
     for step in STEPS:
-        status = (steps.get(step) or {}).get("status", "PENDING")
-        parts.append(f'<span class="fm-step {esc(status)}">{esc(STEP_LABEL[step])}</span>')
+        result = steps.get(step) or {}
+        status, label = result.get("status", "PENDING"), STEP_LABEL[step]
+        if step == "PRICE" and result.get("skipped"):
+            status, label = "SKIPPED", "가격 건너뜀"
+        parts.append(f'<span class="fm-step {esc(status)}">{esc(label)}</span>')
     return f'<div class="fm-steps">{"".join(parts)}</div>'
 
 

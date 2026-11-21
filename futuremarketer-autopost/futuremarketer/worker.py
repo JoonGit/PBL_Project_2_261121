@@ -637,7 +637,7 @@ class Worker:
                     script = job["steps_json"]["SCRIPT"]
                     copy = f"{script['title']}\n{script['body']}"
                     if SALE_TERMS.search(copy) or AMOUNT_RE.search(copy):
-                        raise StepFailed("PREVIEW_ONLY", "게시 보류 · 가격표 단계는 끝났습니다. 금액이나 판매 안내가 있는 소식은 사업자 인증을 확인한 뒤 게시할 수 있습니다.")
+                        raise StepFailed("PREVIEW_ONLY", "게시 보류 · 금액이나 판매 안내가 있는 소식은 사업자 인증을 확인한 뒤 게시할 수 있습니다.")
             return call(site, before_submit)
         except SiteError as exc:
             shot = self._capture(site)
@@ -661,6 +661,9 @@ class Worker:
     def _step_price(self, job: dict, submitted: dict) -> dict:
         """가격표에 대표 사진(첫 번째 사진)과 상품명·가격을 올린다."""
         req = job["request_json"]
+        if not req.get("register_price", True):
+            self._event(job, "PRICE", "INFO", "가격표 등록을 건너뜁니다.")
+            return {"skipped": True}
         keys = job["steps_json"]["IMAGE"].get("image_keys") or []
         image = self.store.path_for(keys[0]) if keys else None
         result = self._site_call(job, "PRICE", submitted, lambda site, before: site.register_price(

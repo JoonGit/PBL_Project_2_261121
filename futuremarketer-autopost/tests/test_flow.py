@@ -186,6 +186,36 @@ def test_draft_only_button_stops_a_verified_job_until_explicit_registration(engi
     assert len(hub.prices) == len(hub.posts) == text_ai.calls == 1
 
 
+def test_price_off_registers_and_removes_only_news(engine, store, settings, secrets, worker, hub):
+    rows = prepare(engine, store, settings, secrets, [["P1", "탁상시계", 12000, "원목 시계", None, "시곗바늘을 맞추는 방법을 소개합니다.", None]])
+    product_id = rows["P1"]["id"]
+    register_service.enqueue_register(engine, secrets, settings, [product_id], run_key="news-only", register_price=False)
+    run_until_idle(worker)
+    job = job_of(engine, "P1")
+    assert job["status"] == "SUCCEEDED" and job["steps_json"]["PRICE"]["skipped"]
+    assert not hub.prices and len(hub.posts) == 1
+    removal = register_service.request_removal(engine, product_id)
+    assert removal["price"] is None and removal["news"] == hub.posts[0]["title"]
+    run_until_idle(worker)
+    assert not hub.prices and not hub.posts
+
+
+def test_price_can_be_enabled_on_retry_after_it_was_skipped(engine, store, settings, secrets, worker, hub):
+    rows = prepare(engine, store, settings, secrets, [["P1", "탁상시계", 12000, "원목 시계", None, "원목 탁상시계 사용법입니다.", None]])
+    product_id = rows["P1"]["id"]
+    hub.fail["news_before"] = SiteError("ELEMENT_NOT_FOUND", "소식 작성이 중단됐습니다.")
+    register_service.enqueue_register(engine, secrets, settings, [product_id], run_key="price-off", register_price=False)
+    run_until_idle(worker)
+    job = job_of(engine, "P1")
+    assert job["status"] == "FAILED" and job["steps_json"]["PRICE"]["skipped"] and not hub.prices
+    hub.fail.clear()
+    register_service.enqueue_register(engine, secrets, settings, [product_id], run_key="price-on")
+    run_until_idle(worker)
+    resumed = job_of(engine, "P1")
+    assert resumed["id"] == job["id"] and resumed["status"] == "SUCCEEDED"
+    assert len(hub.prices) == len(hub.posts) == 1
+
+
 def test_new_default_guidelines_preserve_history_and_custom_prompts(engine):
     from futuremarketer.db_init import seed
     from futuremarketer.repositories.core import active_prompt

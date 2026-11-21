@@ -69,10 +69,10 @@ def finish_product(session, job: dict, status: str, now) -> None:
             st=status, now=now, id=job["product_id"])
 
 
-def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool) -> None:
+def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool, register_price: bool) -> None:
     """실패한 작업을 다시 줄에 세운다. 끝난 단계의 결과는 그대로 두고, 지침은 지금 것으로 바꾼다.
 
-    예외 하나: 가격 단계가 사진을 올리지 않던 예전 방식으로 끝났다면 이번에 다시 한다.
+    가격표 등록을 켠 경우, 건너뛴 가격 단계나 사진을 올리지 않던 예전 방식으로 끝난 가격 단계를 다시 한다.
     가격 단계는 같은 이름의 항목을 찾아 고치므로, 다시 해도 가격표에 두 번 올라가지 않고 사진만 붙는다.
     """
     steps = job["steps_json"]
@@ -80,9 +80,10 @@ def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool) -> None
         if steps[step]["status"] != "DONE":
             steps[step] = {"status": "PENDING"}
     price = steps["PRICE"]
-    if price["status"] == "DONE" and "photo" not in price and "detail" not in price:
+    if register_price and price["status"] == "DONE" and (price.get("skipped") or ("photo" not in price and "detail" not in price)):
         steps["PRICE"] = {"status": "PENDING"}
-    request = {**job["request_json"], "draft_only": draft_only, "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
+    request = {**job["request_json"], "draft_only": draft_only, "register_price": register_price,
+               "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
                "prompt_versions": {k: v["version_no"] for k, v in prompts.items()}}
     execute(session,
             "UPDATE task_job SET status='QUEUED', steps_json=:steps, request_json=:req, current_step=NULL, run_token=NULL,"
@@ -93,7 +94,7 @@ def _resume(session, job: dict, prompts: dict, now, *, draft_only: bool) -> None
 
 
 def enqueue_register(engine, secrets: SecretStore, settings: Settings, product_ids: list[str], *,
-                     run_key: str, draft_only: bool = False) -> dict:
+                     run_key: str, draft_only: bool = False, register_price: bool = True) -> dict:
     """고른 상품들을 등록 줄에 세운다. 돌려주는 값: {run_id, queued:[코드], skipped:[{code, reason}]}"""
     ids = list(dict.fromkeys(product_ids))
     if not ids:
@@ -137,13 +138,14 @@ def enqueue_register(engine, secrets: SecretStore, settings: Settings, product_i
             if last and last["status"] == "FAILED" and job_place(last) == place \
                     and last["request_json"].get("kind") != "REMOVE" \
                     and last["request_json"].get("fingerprint") == product["source_fingerprint"]:
-                _resume(s, last, prompts, now, draft_only=draft_only)
+                _resume(s, last, prompts, now, draft_only=draft_only, register_price=register_price)
                 queued.append(code)
                 continue
             job_id = new_id()
             request = {"product_code": code, "name": product["name"], "price": product["price_krw"],
                        "info": product["info"], "post_title": product["post_title"], "script": product["script"],
-                       "fingerprint": product["source_fingerprint"], "target": place[0], "biz_id": place[1], "draft_only": draft_only,
+                       "fingerprint": product["source_fingerprint"], "target": place[0], "biz_id": place[1],
+                       "draft_only": draft_only, "register_price": register_price,
                        "text_prompt": prompts["TEXT"]["body"], "image_prompt": prompts["IMAGE"]["body"],
                        "prompt_versions": {k: v["version_no"] for k, v in prompts.items()}}
             execute(s,
@@ -263,7 +265,7 @@ def removal_plan(session, product_id: str, place: tuple[str, str] | None) -> dic
             if job["status"] == "SUCCEEDED":
                 break
             continue
-        if price is None and steps["PRICE"]["status"] == "DONE":
+        if price is None and steps["PRICE"]["status"] == "DONE" and not steps["PRICE"].get("skipped"):
             price = steps["PRICE"].get("item_name") or fit_text(" ".join(request["name"].split()), PRICE_NAME_MAX)
         if news is None and steps["NEWS"]["status"] == "DONE" and steps["NEWS"].get("title"):
             news = steps["NEWS"]["title"]

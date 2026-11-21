@@ -40,10 +40,12 @@ def _load() -> None:
 def _register() -> None:
     ids = [i for i in st.session_state.get("_selectable", []) if st.session_state.get(f"sel_{i}")]
     draft_only = st.session_state.get("draft_only", False)
+    register_price = st.session_state.get("register_price", True)
     try:
         common.start_worker()       # 워커가 꺼져 있었다면 다시 켠다
         out = register_service.enqueue_register(common.engine(), common.secrets(), common.settings(), ids,
-                                                run_key=common.request_key(RUN_KEY), draft_only=draft_only)
+                                                run_key=common.request_key(RUN_KEY), draft_only=draft_only,
+                                                register_price=register_price)
     except Exception as exc:
         common.flash(common.error_text(exc), "error")
         return
@@ -254,7 +256,11 @@ def _list(listing: dict) -> None:
         common.section(f"상품 {len(rows)}개", summary)
     with action:
         draft_only = st.checkbox("게시하지 않고 초안만 준비", key="draft_only")
-        action_name = "초안 준비" if draft_only else "등록"
+        register_price = st.toggle("가격표 등록", value=True, key="register_price", disabled=draft_only,
+                                   help="끄면 가격표는 건너뛰고 소식만 등록합니다.")
+        action_name = "등록" if register_price else "소식 등록"
+        if draft_only:
+            action_name = "초안 준비"
         st.button(f"선택한 {len(chosen)}개 {action_name}" if chosen else "등록할 상품을 골라 주세요", type="primary",
                   disabled=not chosen, on_click=_register, width="stretch", icon=":material/send:")
     st.checkbox("등록 가능한 상품 모두 선택", key="sel_all", on_change=_select_all, disabled=not selectable)

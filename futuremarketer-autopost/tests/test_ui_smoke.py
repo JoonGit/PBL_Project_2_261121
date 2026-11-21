@@ -77,11 +77,16 @@ def test_pages_render_empty_and_filled(app_env, engine, store, settings, secrets
     assert not at.exception, at.exception
     assert len(at.get("image") or at.get("imgs")) == 1
     assert job_count(engine) == 0
-    boxes[0].check().run()
-    register = next(b for b in at.button if "등록" in b.label and "선택한 1개" in b.label)
+    price_toggle = at.toggle(key="register_price")
+    assert price_toggle.value
+    price_toggle.set_value(False).run()
+    at.checkbox(key=boxes[0].key).check().run()
+    register = next(b for b in at.button if b.label == "선택한 1개 소식 등록")
     register.click().run()
     assert not at.exception, at.exception
     assert job_count(engine) == 1
+    with session_scope(engine) as session:
+        assert fetch_one(session, "SELECT request_json FROM task_job")["request_json"]["register_price"] is False
     at.run()
     assert job_count(engine) == 1
 
